@@ -82,6 +82,22 @@ canvas) and skips — no double move. Prefer running just this plugin.
 | `MinTotalCanvasRenderers` | `5000` | The canvas must reach this many CanvasRenderers before it counts as "built". |
 | `UseEplSignal` | `true` | Use EPL's `OnBundleLoadingComplete` event to detect the end of loading. |
 | `TooltipDedicatedCanvas` | `true` | Move the tooltip UI onto its own tiny canvas (the hover-stutter fix, ported from TooltipStutterFix). Tooltips stay visible. |
+| `PreserveZOrder` | `true` | Reparent mode: also move small elements that render **in front of** a split screen (e.g. the board-game shop's shopping cart) so the screen doesn't cover them. See below. |
+
+### Z-order (the shopping-cart fix)
+
+On the shared canvas, a higher **sibling index** renders in front. When a big screen moves to its
+own canvas it gets a high sort order, so anything that was in front of it (a higher sibling index)
+would end up **behind** it — that's why the board-game shop's shopping cart (a separate
+`RestockItemAddToCartScreen` element) appeared behind the shop.
+
+With `PreserveZOrder = true` (default), the plugin moves **every element that was in front of the
+earliest split screen** onto its own canvas too, and assigns each moved element
+`sortingOrder = BaseSortingOrder + (its original sibling index)`. That preserves the exact original
+layering: the cart stays in front of the shop, and every other element keeps its relative order.
+
+If moving an extra element ever causes a problem (e.g. a mod references it by path), add its name to
+`ExcludeNames`, or set `PreserveZOrder = false` to fall back to moving only the big screens.
 
 > **Timing matters (two gates).** The game shows a loading screen that can last *well over
 > 15 s* with many content packs; during it the shared canvas only holds the base UI

@@ -43,7 +43,7 @@ namespace CanvasSplitter
     /// This plugin makes no Harmony patches. It runs once per scene load. It references the
     /// game assembly only for the tooltip fix (InputTooltipListDisplay).
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.4.0")]
+    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.5.0")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -69,6 +69,7 @@ namespace CanvasSplitter
         private ConfigEntry<int> _minTotalCR;
         private ConfigEntry<bool> _useEplSignal;
         private ConfigEntry<bool> _tooltipFix;
+        private ConfigEntry<bool> _preserveZOrder;
 
         private Canvas _giant;
         private bool _bundleComplete;
@@ -145,9 +146,16 @@ namespace CanvasSplitter
                 "(the root fix for hover stutter, ported from TooltipStutterFix). Tooltips stay visible. " +
                 "Keep TooltipStutterFix disabled when this is on (this step detects and skips it if both run).");
 
+            _preserveZOrder = Config.Bind("General", "PreserveZOrder", true,
+                "Reparent mode only: also move small elements that render IN FRONT of a split screen " +
+                "(e.g. the board-game shop's shopping cart) onto their own canvas with a higher sort order, " +
+                "so the split screen doesn't cover them. Sort order = BaseSortingOrder + original sibling " +
+                "index, which preserves the exact original layering. False = move only big screens (an " +
+                "overlay in front of a screen can end up behind it).");
+
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v1.4.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value}, Tooltip={_tooltipFix.Value})");
+            Logger.LogInfo($"[CanvasSplitter] v1.5.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value}, Tooltip={_tooltipFix.Value}, PreserveZ={_preserveZOrder.Value})");
         }
 
         private void ParseExcludes()
@@ -458,34 +466,58 @@ namespace CanvasSplitter
         private void ApplySplit()
         {
             if (_giant == null) return;
-            var children = new List<Transform>();
-            for (int i = 0; i < _giant.transform.childCount; i++)
-                children.Add(_giant.transform.GetChild(i));
+            int n = _giant.transform.childCount;
+            var children = new Transform[n];
+            for (int i = 0; i < n; i++)
+                children[i] = _giant.transform.GetChild(i);
 
-            int moved = 0, skippedSmall = 0, skippedExcl = 0;
-            int sortOrder = _baseSortOrder.Value;
+            int baseSort = _baseSortOrder.Value;
+            bool preserveZ = _mode.Value == SplitMode.Reparent && _preserveZOrder.Value;
 
-            foreach (var t in children)
+            // Z-order (Reparent + PreserveZOrder): within the shared canvas, a higher sibling index
+            // renders in FRONT. When a big screen moves to its own canvas it gets a high sort order,
+            // so ANY element that was in front of it (higher sibling index) would now be COVERED by
+            // it - e.g. the board-game shop's shopping cart. To keep the original layering, every
+            // element after the earliest split screen is moved too, with sort = base + sibling index
+            // (which preserves the exact relative order of all moved elements).
+            int minBigIndex = -1;
+            if (preserveZ)
             {
+                for (int j = 0; j < n; j++)
+                {
+                    if (children[j] == null || _excluded.Contains(children[j].name)) continue;
+                    if (children[j].GetComponentsInChildren<CanvasRenderer>(true).Length >= _minCR.Value) { minBigIndex = j; break; }
+                }
+            }
+
+            int moved = 0, movedOverlay = 0, skippedSmall = 0, skippedExcl = 0;
+
+            for (int j = 0; j < n; j++)
+            {
+                var t = children[j];
                 if (t == null) continue;
-                int cr = t.GetComponentsInChildren<CanvasRenderer>(true).Length;
-                if (cr < _minCR.Value) { skippedSmall++; continue; }
                 if (_excluded.Contains(t.name))
                 {
-                    Logger.LogInfo($"[CanvasSplitter]   skip (excluded): '{t.name}' CR={cr}");
+                    Logger.LogInfo($"[CanvasSplitter]   skip (excluded): '{t.name}'");
                     skippedExcl++;
                     continue;
                 }
+                int cr = t.GetComponentsInChildren<CanvasRenderer>(true).Length;
+                bool isBig = cr >= _minCR.Value;
+                bool inFrontOfBig = (minBigIndex >= 0 && j > minBigIndex);
+                if (!isBig && !(preserveZ && inFrontOfBig)) { skippedSmall++; continue; }
+
+                int sortOrder = baseSort + j; // sort = base + original sibling index preserves z-order
                 if (t.gameObject.activeInHierarchy)
                     Logger.LogWarning($"[CanvasSplitter]   NOTE: '{t.name}' is ACTIVE while being split (may cause a one-frame visual blip).");
 
                 if (_mode.Value == SplitMode.Reparent) ReparentScreen(t, cr, sortOrder);
                 else NestScreen(t, cr, sortOrder);
-                sortOrder++;
+                if (!isBig && inFrontOfBig) movedOverlay++;
                 moved++;
             }
 
-            Logger.LogInfo($"[CanvasSplitter] done: mode={_mode.Value} moved={moved} skippedSmall={skippedSmall} skippedExcluded={skippedExcl}");
+            Logger.LogInfo($"[CanvasSplitter] done: mode={_mode.Value} moved={moved} overlays={movedOverlay} skippedSmall={skippedSmall} skippedExcluded={skippedExcl} minBigIndex={minBigIndex}");
         }
 
         private void ReparentScreen(Transform screen, int cr, int sortOrder)
