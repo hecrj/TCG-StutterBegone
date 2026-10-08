@@ -1,0 +1,78 @@
+# Canvas Splitter (TCG Card Shop Simulator)
+
+BepInEx 5 plugin. Generalizes the **TooltipStutterFix** "dedicated canvas" idea to the
+whole game UI.
+
+## Why
+
+The game pools **every** full-screen UI under one shared `ScreenSpaceOverlay` canvas
+(`Canvas`). With a full mod set that canvas holds ~144,000–150,000 `CanvasRenderer`
+components (only ~50–140 active at a time):
+
+| Subtree | CanvasRenderers | Notes |
+|---|---|---|
+| `CheckPriceScreen_Grp` | ~47,800 | vanilla screen, grown by EPL (one panel per card/item) |
+| `RestockItemScreen_Grp` | ~26,700 | vanilla screen, **path-referenced by EPL/ShopOS** |
+| `RestockItemBoardGameScreen_Grp` | ~26,700 | vanilla screen, grown by EPL |
+| `PlayCardSetUIScreenGrp` | ~10,800 | |
+| `DeckEditCanvasGrp` | ~5,800 | |
+| `CustomShop_SharedScreen_Grp` | ~5,200 | **created by EPL** for custom-shop mods |
+| `FurnitureShopUIScreen_Grp` | ~4,700 | |
+| … ~47 more screens … | | |
+
+Unity invalidates and rebuilds at the **canvas** granularity, so anything that dirties that
+canvas pays the full ~144k cost. The per-frame churn source (the tooltip) is already fixed by
+**TooltipStutterFix**. This plugin additionally moves each big screen onto its own canvas, so
+opening/interacting with a screen only rebuilds that screen's canvas instead of all 144k.
+
+## Modes
+
+- **`Reparent`** (default) — create a new root `ScreenSpaceOverlay` canvas per qualifying
+  screen and move the screen group onto it (the original canvas's `CanvasScaler` is copied,
+  so it renders identically). This is the same proven technique as the tooltip fix.
+  By default it **excludes** the screens that other code locates by path
+  (`RestockItemScreen_Grp` — used by EPL/ShopOS via
+  `GameObject.Find("Canvas/RestockItemScreen_Grp")`) and the mod-created
+  `CustomShop_SharedScreen_Grp`, so nothing breaks.
+- **`Nested`** (experimental) — add a nested `overrideSorting` `Canvas` to each screen **in
+  place**. No hierarchy/path change, so it can move *every* screen (including
+  `RestockItemScreen_Grp`) without breaking any `GameObject.Find`. Needs in-game visual
+  verification (scaling/rendering of a nested overlay canvas).
+- **`Off`** — do nothing.
+
+## Config (`BepInEx/config/hover.canvas.splitter.cfg`)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `Enabled` | `true` | Master switch. |
+| `Mode` | `Reparent` | `Reparent` / `Nested` / `Off`. |
+| `GiantCanvasName` | `Canvas` | The shared canvas to split (falls back to the biggest canvas). |
+| `MinCanvasRenderers` | `2000` | Only split screens with ≥ this many CanvasRenderers. Lower = more moved, higher = less risk. |
+| `ExcludeNames` | (see source) | Comma-separated screen names to skip. Defaults protect path-referenced + mod-created screens. |
+| `ApplyDelayFrames` | `10` | Frames to wait after scene load before splitting (lets other mods cache references). |
+| `BaseSortingOrder` | `1000` | Base `sortingOrder` for new screen canvases (sibling order added to preserve layering). Keep above the shared canvas (0) and below the tooltip canvas (2000). |
+
+## Will it break anything?
+
+- **`Reparent` (default): low risk.** Reparenting is the same proven move as the tooltip fix.
+  The only screens referenced *by path* are `RestockItemScreen_Grp` (EPL/ShopOS) and the
+  mod-created `CustomShop_SharedScreen_Grp`; both are excluded by default, so no
+  `GameObject.Find` breaks. The game itself only references the `Canvas` **root** (to
+  enable/disable it on scene transitions), which this plugin leaves in place.
+  If you remove `RestockItemScreen_Grp` from `ExcludeNames`, you risk breaking EPL/ShopOS
+  custom-shop setup (it `Find`s that screen once at init).
+- **`Nested`: no path risk, but verify visuals.** Because nothing is reparented, no
+  `GameObject.Find` can break — you can move every screen. The uncertainty is whether a
+  nested `ScreenSpaceOverlay` canvas renders/scales exactly like before; check each screen
+  in-game.
+
+## Building
+
+```
+dotnet build -c Release -p:GameDir="C:/path/to/TCG Card Shop Simulator" -o out
+```
+Deploy `out/CanvasSplitter.dll` to `BepInEx/plugins/CanvasSplitter/`.
+
+## Uninstall
+
+Delete `BepInEx/plugins/CanvasSplitter/`. No game or mod files are modified.
