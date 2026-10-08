@@ -59,14 +59,22 @@ opening/interacting with a screen only rebuilds that screen's canvas instead of 
 | `BaseSortingOrder` | `1000` | Base `sortingOrder` for new screen canvases (sibling order added to preserve layering). Keep above the shared canvas (0) and below the tooltip canvas (2000). |
 | `ProbeInterval` | `30` | Frames between canvas-size samples while waiting for the UI to finish building. |
 | `SettleFrames` | `90` | How long the element count must be unchanged before splitting. |
-| `MaxWaitFrames` | `900` | Give up waiting after this and split anyway. |
+| `MaxWaitFrames` | `900` | Give up the settle wait after this and split anyway (also scales the loading-done hard cap). |
 | `MinTotalCanvasRenderers` | `5000` | The canvas must reach this many CanvasRenderers before it counts as "built". |
+| `UseEplSignal` | `true` | Use EPL's `OnBundleLoadingComplete` event to detect the end of loading. |
 
-> **Timing matters.** The game + EPL add the shop screens and their thousands of panels
-> *seconds* after the canvas first appears. This plugin waits until the canvas element count
-> **settles** (unchanged for `SettleFrames`) before splitting — otherwise it moves nothing and
-> the fix never applies. You'll see `building: children X->Y, CanvasRenderers A->B` log lines
-> while it waits, then `CENSUS BEFORE` / `CENSUS AFTER`.
+> **Timing matters (two gates).** The game shows a loading screen that can last *well over
+> 15 s* with many content packs; during it the shared canvas only holds the base UI
+> (~8 children / ~2k CR). This plugin waits in two phases:
+> 1. **Loading done** — subscribes (via reflection, no hard dependency) to EPL's
+>    `OnBundleLoadingComplete` event, which is *hot/cold* (fires immediately if loading already
+>    finished). Without EPL it falls back to the canvas reaching `MinTotalCanvasRenderers`.
+> 2. **Canvas built** — waits until the element count **settles** (unchanged for
+>    `SettleFrames`) after loading, since the shop panels are added after loading.
+>
+> You'll see `subscribed to EPL OnBundleLoadingComplete`, then `EPL OnBundleLoadingComplete
+> fired`, then `building: children X->Y, CanvasRenderers A->B` lines, then
+> `CENSUS BEFORE` / `CENSUS AFTER`.
 
 ## Will it break anything?
 

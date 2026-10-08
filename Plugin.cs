@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
 using UnityEngine;
@@ -35,7 +36,7 @@ namespace CanvasSplitter
     /// This plugin only uses Unity types (no game-assembly coupling) and makes no Harmony
     /// patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.1.0")]
+    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.2.0")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -59,8 +60,11 @@ namespace CanvasSplitter
         private ConfigEntry<int> _settleFrames;
         private ConfigEntry<int> _maxWaitFrames;
         private ConfigEntry<int> _minTotalCR;
+        private ConfigEntry<bool> _useEplSignal;
 
         private Canvas _giant;
+        private bool _bundleComplete;
+        private bool _eplSubscribed;
         private HashSet<string> _excluded = new HashSet<string>(StringComparer.Ordinal);
 
         // Default excludes protect screens that other code locates by path or that are
@@ -117,9 +121,13 @@ namespace CanvasSplitter
                 "The shared canvas must reach at least this many CanvasRenderers before it is considered " +
                 "built (guards against splitting a canvas that never grows).");
 
+            _useEplSignal = Config.Bind("General", "UseEplSignal", true,
+                "Use EPL's OnBundleLoadingComplete event to know when content loading finishes " +
+                "(recommended; handles the long loading screen). False = fall back to canvas-size heuristics.");
+
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v1.1.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, Settle={_settleFrames.Value}f)");
+            Logger.LogInfo($"[CanvasSplitter] v1.2.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value})");
         }
 
         private void ParseExcludes()
@@ -152,11 +160,44 @@ namespace CanvasSplitter
             // optional initial delay
             for (int i = 0; i < Mathf.Max(0, _delayFrames.Value); i++) yield return null;
 
-            // Phase 2: wait until the canvas is FULLY built. The game + EPL add the shop
-            // screens and their thousands of panels over several seconds after scene load
-            // (EPL patches CheckPriceScreen.Init / RestockItemScreen.Init and runs on scene load),
-            // so we must wait for the element count to settle before splitting - otherwise we
-            // move nothing (the canvas is still tiny) and the fix never applies.
+            // Phase 2a: wait for CONTENT LOADING to finish. The game shows a loading screen
+            // (which can last well over 15s with many content packs) during which the shared
+            // canvas only holds the base UI (~8 children / ~2k CR). We must NOT split then.
+            // EPL fires OnBundleLoadingComplete (a hot/cold event) when the bundles finish
+            // loading - that is our "loading done" gate. Without EPL we fall back to the
+            // canvas reaching a minimum size.
+            bool loadingDone = false;
+            int aFrame = 0, aHardCap = Mathf.Max(60, _maxWaitFrames.Value * 6);
+            while (!loadingDone && aFrame < aHardCap)
+            {
+                yield return null;
+                aFrame++;
+                if (_useEplSignal.Value && !_eplSubscribed && aFrame % 10 == 0)
+                {
+                    if (TrySubscribeBundleComplete())
+                    {
+                        _eplSubscribed = true;
+                        Logger.LogInfo("[CanvasSplitter] subscribed to EPL OnBundleLoadingComplete (hot/cold).");
+                    }
+                }
+                if (_bundleComplete)
+                {
+                    loadingDone = true;
+                    Logger.LogInfo($"[CanvasSplitter] EPL OnBundleLoadingComplete fired (frame {aFrame}) - content loaded.");
+                }
+                else if (!_useEplSignal.Value && aFrame % 30 == 0 && CountCR(_giant) >= _minTotalCR.Value)
+                {
+                    loadingDone = true;
+                    Logger.LogInfo("[CanvasSplitter] no EPL signal; canvas reached threshold - assuming content loaded.");
+                }
+            }
+            if (!loadingDone)
+                Logger.LogWarning($"[CanvasSplitter] loading-done wait hit hard cap ({aHardCap}f); proceeding.");
+
+            // Phase 2b: wait until the canvas is FULLY built. The shop screens and their
+            // thousands of panels are added after loading (EPL patches CheckPriceScreen.Init /
+            // RestockItemScreen.Init), so the canvas grows from ~2k to ~144k. Split only once
+            // the element count has stopped growing.
             int lastCR = -1, lastCC = -1, lastChangeFrame = 0, frame = 0;
             int maxWait = Mathf.Max(1, _maxWaitFrames.Value);
             int probe = Mathf.Max(1, _probeInterval.Value);
@@ -179,13 +220,52 @@ namespace CanvasSplitter
                     break; // settled and big enough
             }
             if (frame >= maxWait)
-                Logger.LogWarning($"[CanvasSplitter] max wait ({maxWait}f) reached (children={lastCC}, CR={lastCR}); splitting anyway.");
+                Logger.LogWarning($"[CanvasSplitter] settle wait hit max ({maxWait}f, CR={lastCR}); splitting anyway.");
 
             ParseExcludes();
             LogCensus("BEFORE");
             ApplySplit();
             LogCensus("AFTER");
             yield break;
+        }
+
+        /// <summary>
+        /// Subscribes to EPL's OnBundleLoadingComplete via reflection (no hard compile-time
+        /// dependency on the EPL API assembly). Returns true once subscribed (the event is
+        /// hot/cold, so it fires immediately if loading already finished).
+        /// </summary>
+        private bool TrySubscribeBundleComplete()
+        {
+            try
+            {
+                Type eplType = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try { eplType = asm.GetType("EnhancedPrefabLoader.API.Epl"); } catch { }
+                    if (eplType != null) break;
+                }
+                if (eplType == null) return false;
+
+                var isAvail = eplType.GetProperty("IsAvailable", BindingFlags.Public | BindingFlags.Static);
+                if (isAvail == null || !Convert.ToBoolean(isAvail.GetValue(null))) return false;
+
+                object api = eplType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static).GetValue(null);
+                if (api == null) return false;
+
+                object events = api.GetType().GetProperty("Events").GetValue(api);
+                if (events == null) return false;
+
+                var evt = events.GetType().GetEvent("OnBundleLoadingComplete");
+                if (evt == null) return false;
+
+                evt.AddEventHandler(events, new Action(() => _bundleComplete = true));
+                return true;
+            }
+            catch (Exception e)
+            {
+                Logger.LogWarning("[CanvasSplitter] EPL OnBundleLoadingComplete subscribe failed: " + e.Message);
+                return false;
+            }
         }
 
         private static int CountCR(Canvas c)
