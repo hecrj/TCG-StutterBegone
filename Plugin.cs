@@ -33,10 +33,17 @@ namespace CanvasSplitter
     ///     No hierarchy/path change, so it can move EVERY screen (including RestockItemScreen_Grp)
     ///     without breaking any GameObject.Find. Needs in-game visual verification.
     ///
-    /// This plugin only uses Unity types (no game-assembly coupling) and makes no Harmony
-    /// patches. It runs once per scene load.
+    /// Tooltip fix (built in, ported from TooltipStutterFix): the tooltip UI
+    /// (InputTooltipListDisplay) is the per-frame churn source - every hover add/remove
+    /// dirties the shared canvas. This plugin moves it onto its own tiny dedicated overlay
+    /// canvas so a tooltip transition rebuilds ~20 elements instead of ~144k. Tooltips stay
+    /// fully visible. If TooltipStutterFix is also enabled it will have already moved the
+    /// tooltip, so this step detects that and skips (no double move).
+    ///
+    /// This plugin makes no Harmony patches. It runs once per scene load. It references the
+    /// game assembly only for the tooltip fix (InputTooltipListDisplay).
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.3.0")]
+    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.4.0")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -61,11 +68,18 @@ namespace CanvasSplitter
         private ConfigEntry<int> _maxWaitFrames;
         private ConfigEntry<int> _minTotalCR;
         private ConfigEntry<bool> _useEplSignal;
+        private ConfigEntry<bool> _tooltipFix;
 
         private Canvas _giant;
         private bool _bundleComplete;
         private bool _eplSubscribed;
         private HashSet<string> _excluded = new HashSet<string>(StringComparer.Ordinal);
+
+        // Tooltip-dedicated-canvas fix state (ported from TooltipStutterFix).
+        private InputTooltipListDisplay _tipDisplay;
+        private Canvas _tipCanvas;
+        private Canvas _dediCanvas;
+        private Transform _tipOrigParent;
 
         // Default excludes protect screens that other code locates by path or that are
         // created by mods (timing-dependent). Reparent mode is safe with these excluded.
@@ -73,8 +87,9 @@ namespace CanvasSplitter
         {
             "RestockItemScreen_Grp",          // EPL + ShopOS: GameObject.Find("Canvas/RestockItemScreen_Grp")
             "CustomShop_SharedScreen_Grp",    // created by EPL at runtime
-            "InputTooltipListDisplay",        // handled by TooltipStutterFix
-            "TooltipStutterFix_DedicatedCanvas"
+            "InputTooltipListDisplay",        // moved off by the built-in tooltip fix (or TooltipStutterFix)
+            "TooltipStutterFix_DedicatedCanvas",
+            "CanvasSplitter_TooltipCanvas"    // this plugin's tooltip canvas (root object, not under the shared canvas)
         });
 
         private void Awake()
@@ -125,9 +140,14 @@ namespace CanvasSplitter
                 "Use EPL's OnBundleLoadingComplete event to know when content loading finishes " +
                 "(recommended; handles the long loading screen). False = fall back to canvas-size heuristics.");
 
+            _tooltipFix = Config.Bind("General", "TooltipDedicatedCanvas", true,
+                "Move the tooltip UI (InputTooltipListDisplay) onto its own tiny dedicated canvas " +
+                "(the root fix for hover stutter, ported from TooltipStutterFix). Tooltips stay visible. " +
+                "Keep TooltipStutterFix disabled when this is on (this step detects and skips it if both run).");
+
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v1.3.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value})");
+            Logger.LogInfo($"[CanvasSplitter] v1.4.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value}, Tooltip={_tooltipFix.Value})");
         }
 
         private void ParseExcludes()
@@ -233,7 +253,8 @@ namespace CanvasSplitter
                 {
                     ParseExcludes();
                     LogCensus("BEFORE");
-                    ApplySplit();
+                    if (_enabled.Value && _mode.Value != SplitMode.Off) ApplySplit();
+                    if (_enabled.Value && _tooltipFix.Value) ApplyTooltipFix();
                     LogCensus("AFTER");
                 }
                 catch (Exception e)
@@ -241,6 +262,74 @@ namespace CanvasSplitter
                     Logger.LogError("[CanvasSplitter] split failed: " + e);
                 }
                 yield break;
+        }
+
+        /// <summary>
+        /// Ported from TooltipStutterFix (DedicatedCanvas mode): move the tooltip UI subtree
+        /// (InputTooltipListDisplay) off the giant shared canvas onto its own tiny dedicated
+        /// overlay canvas. A tooltip transition then dirties ~20 elements instead of ~144k.
+        /// Skips if the tooltip is already off the shared canvas (e.g. TooltipStutterFix moved it).
+        /// </summary>
+        private void ApplyTooltipFix()
+        {
+            try
+            {
+                if (_tipDisplay == null) _tipDisplay = FindObjectOfType<InputTooltipListDisplay>();
+                if (_tipDisplay == null || _tipDisplay.transform == null)
+                {
+                    Logger.LogWarning("[CanvasSplitter] tooltip fix: InputTooltipListDisplay not found - skipped.");
+                    return;
+                }
+
+                // Nearest canvas the tooltip currently lives on.
+                Transform walk = _tipDisplay.transform;
+                Canvas nearest = null;
+                while (walk != null)
+                {
+                    Canvas c = walk.GetComponent<Canvas>();
+                    if (c != null) { nearest = c; break; }
+                    walk = walk.parent;
+                }
+
+                // If it's already off the shared canvas (e.g. TooltipStutterFix moved it), don't double-move.
+                if (nearest != null && !ReferenceEquals(nearest, _giant))
+                {
+                    Logger.LogInfo($"[CanvasSplitter] tooltip fix: tooltip already off shared canvas (on '{nearest.gameObject.name}') - skipped.");
+                    return;
+                }
+
+                _tipCanvas = nearest; // may be null if not under any canvas; scaler copy will be skipped
+                int before = _tipCanvas != null ? _tipCanvas.GetComponentsInChildren<CanvasRenderer>(true).Length : -1;
+
+                GameObject go = new GameObject("CanvasSplitter_TooltipCanvas");
+                go.layer = _tipDisplay.gameObject.layer;
+                _dediCanvas = go.AddComponent<Canvas>();
+                _dediCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                _dediCanvas.sortingOrder = 2000; // above the shared canvas (0) and all screen canvases (1000+)
+                _dediCanvas.pixelPerfect = false;
+
+                // Copy the shared canvas's scaler so tooltips render at the same size/position.
+                CanvasScaler src = _tipCanvas != null ? _tipCanvas.GetComponent<CanvasScaler>() : null;
+                if (src != null)
+                {
+                    CanvasScaler s = go.AddComponent<CanvasScaler>();
+                    s.uiScaleMode = src.uiScaleMode;
+                    s.referenceResolution = src.referenceResolution;
+                    s.matchWidthOrHeight = src.matchWidthOrHeight;
+                    s.dynamicPixelsPerUnit = src.dynamicPixelsPerUnit;
+                }
+
+                _tipOrigParent = _tipDisplay.transform.parent;
+                _tipDisplay.transform.SetParent(_dediCanvas.transform, worldPositionStays: false);
+                int after = _dediCanvas.GetComponentsInChildren<CanvasRenderer>(true).Length;
+
+                Logger.LogInfo($"[CanvasSplitter] tooltip fix: tooltip UI moved off shared '{(_tipCanvas != null ? _tipCanvas.gameObject.name : "?")}' " +
+                               $"(shared CanvasRenderers={before}, dedicated CanvasRenderers={after}) - hover stutter fix active, tooltips stay visible.");
+            }
+            catch (Exception e)
+            {
+                Logger.LogError("[CanvasSplitter] tooltip fix failed: " + e);
+            }
         }
 
         /// <summary>

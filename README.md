@@ -21,15 +21,21 @@ components (only ~50–140 active at a time):
 | … ~47 more screens … | | |
 
 Unity invalidates and rebuilds at the **canvas** granularity, so anything that dirties that
-canvas pays the full ~144k cost. The per-frame churn source (the tooltip) is already fixed by
-**TooltipStutterFix**. This plugin additionally moves each big screen onto its own canvas, so
-opening/interacting with a screen only rebuilds that screen's canvas instead of all 144k.
+canvas pays the full ~144k cost. Two things make it dirty:
 
-> **Use both.** This plugin makes the *screens* cheaper, but the hover stutter you originally
-> reported is caused by the *tooltip* churning the canvas ~100x/sec — that is fixed by
-> **TooltipStutterFix**, not this one. With TooltipStutterFix disabled, the tooltip stays on the
-> (still large) shared canvas, so the hover stutter will remain even after this plugin splits
-> the screens. Enable both for the full fix.
+1. **The tooltip** (per-frame churn) — every hover add/remove rebuilds the canvas ~100x/sec.
+   Fixed by moving the tooltip onto its own tiny canvas (this plugin does it; see below).
+2. **The big screens** (opening/interacting) — each rebuilds all ~144k. Fixed by moving each
+   big screen onto its own canvas, so only that screen's canvas rebuilds.
+
+This plugin does **both**: it splits the big screens *and* moves the tooltip off the shared
+canvas (the tooltip fix is ported in from **TooltipStutterFix**, so you no longer need that
+plugin). One plugin, full fix.
+
+> **Use just this plugin.** The tooltip fix is built in (`TooltipDedicatedCanvas = true` by
+> default), so the hover stutter is fixed here too. **Disable `TooltipStutterFix`** to avoid two
+> plugins fighting over the tooltip — this plugin detects if the tooltip was already moved and
+> skips it, so it's safe to leave both on, but only one is needed.
 
 ## Modes
 
@@ -45,6 +51,19 @@ opening/interacting with a screen only rebuilds that screen's canvas instead of 
   `RestockItemScreen_Grp`) without breaking any `GameObject.Find`. Needs in-game visual
   verification (scaling/rendering of a nested overlay canvas).
 - **`Off`** — do nothing.
+
+## Tooltip fix (built in)
+
+The hover stutter you originally reported is caused by the **tooltip** churning the shared
+canvas: every hover over a shelf item adds/removes tooltip elements, which dirties the ~144k-
+element canvas ~100x/sec. This plugin moves the tooltip UI (`InputTooltipListDisplay`) onto its
+own tiny dedicated overlay canvas (`CanvasSplitter_TooltipCanvas`, sort 2000, above everything).
+A tooltip transition then rebuilds ~20 elements instead of ~144k. **Tooltips stay fully visible**
+— only the canvas they live on changes. This is the same proven technique as `TooltipStutterFix`.
+
+Toggle it with `TooltipDedicatedCanvas` (default `true`). If you also run `TooltipStutterFix`,
+it moves the tooltip first and this step detects that (tooltip no longer under the shared
+canvas) and skips — no double move. Prefer running just this plugin.
 
 ## Config (`BepInEx/config/hover.canvas.splitter.cfg`)
 
@@ -62,6 +81,7 @@ opening/interacting with a screen only rebuilds that screen's canvas instead of 
 | `MaxWaitFrames` | `900` | Give up the settle wait after this and split anyway (also scales the loading-done hard cap). |
 | `MinTotalCanvasRenderers` | `5000` | The canvas must reach this many CanvasRenderers before it counts as "built". |
 | `UseEplSignal` | `true` | Use EPL's `OnBundleLoadingComplete` event to detect the end of loading. |
+| `TooltipDedicatedCanvas` | `true` | Move the tooltip UI onto its own tiny canvas (the hover-stutter fix, ported from TooltipStutterFix). Tooltips stay visible. |
 
 > **Timing matters (two gates).** The game shows a loading screen that can last *well over
 > 15 s* with many content packs; during it the shared canvas only holds the base UI
