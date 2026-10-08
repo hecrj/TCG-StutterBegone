@@ -36,7 +36,7 @@ namespace CanvasSplitter
     /// This plugin only uses Unity types (no game-assembly coupling) and makes no Harmony
     /// patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.2.0")]
+    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.2.1")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -127,7 +127,7 @@ namespace CanvasSplitter
 
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v1.2.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value})");
+            Logger.LogInfo($"[CanvasSplitter] v1.2.1 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value})");
         }
 
         private void ParseExcludes()
@@ -143,90 +143,104 @@ namespace CanvasSplitter
 
         private IEnumerator WaitForScene()
         {
-            // Phase 1: wait for the giant canvas to exist at all.
-            while (true)
-            {
-                _giant = FindGiantCanvas();
-                if (_giant != null && _giant.transform.childCount >= 3) break;
-                yield return null;
-            }
+                // NOTE: the loading/base canvas is DESTROYED and replaced when the game
+                // transitions to the shop scene (shortly after EPL's OnBundleLoadingComplete).
+                // So we never trust a cached canvas reference - we re-find it every probe and
+                // guard against it being gone. _giant is only a convenience cache.
 
-            if (!_enabled.Value || _mode.Value == SplitMode.Off)
-            {
-                Logger.LogInfo($"[CanvasSplitter] disabled (Enabled={_enabled.Value}, Mode={_mode.Value}) - doing nothing.");
-                yield break;
-            }
+                // Phase 1: wait for the game to be up (a canvas exists).
+                while (FindGiantCanvas() == null) yield return null;
 
-            // optional initial delay
-            for (int i = 0; i < Mathf.Max(0, _delayFrames.Value); i++) yield return null;
-
-            // Phase 2a: wait for CONTENT LOADING to finish. The game shows a loading screen
-            // (which can last well over 15s with many content packs) during which the shared
-            // canvas only holds the base UI (~8 children / ~2k CR). We must NOT split then.
-            // EPL fires OnBundleLoadingComplete (a hot/cold event) when the bundles finish
-            // loading - that is our "loading done" gate. Without EPL we fall back to the
-            // canvas reaching a minimum size.
-            bool loadingDone = false;
-            int aFrame = 0, aHardCap = Mathf.Max(60, _maxWaitFrames.Value * 6);
-            while (!loadingDone && aFrame < aHardCap)
-            {
-                yield return null;
-                aFrame++;
-                if (_useEplSignal.Value && !_eplSubscribed && aFrame % 10 == 0)
+                if (!_enabled.Value || _mode.Value == SplitMode.Off)
                 {
-                    if (TrySubscribeBundleComplete())
+                    Logger.LogInfo($"[CanvasSplitter] disabled (Enabled={_enabled.Value}, Mode={_mode.Value}) - doing nothing.");
+                    yield break;
+                }
+
+                for (int i = 0; i < Mathf.Max(0, _delayFrames.Value); i++) yield return null;
+
+                // Phase 2a: wait for CONTENT LOADING to finish (the long loading screen).
+                // EPL fires OnBundleLoadingComplete (hot/cold) when the bundles finish loading.
+                bool loadingDone = false;
+                int aFrame = 0, aHardCap = Mathf.Max(60, _maxWaitFrames.Value * 6);
+                while (!loadingDone && aFrame < aHardCap)
+                {
+                    yield return null;
+                    aFrame++;
+                    if (_useEplSignal.Value && !_eplSubscribed && aFrame % 10 == 0)
                     {
-                        _eplSubscribed = true;
-                        Logger.LogInfo("[CanvasSplitter] subscribed to EPL OnBundleLoadingComplete (hot/cold).");
+                        if (TrySubscribeBundleComplete())
+                        {
+                            _eplSubscribed = true;
+                            Logger.LogInfo("[CanvasSplitter] subscribed to EPL OnBundleLoadingComplete (hot/cold).");
+                        }
+                    }
+                    if (_bundleComplete)
+                    {
+                        loadingDone = true;
+                        Logger.LogInfo($"[CanvasSplitter] EPL OnBundleLoadingComplete fired (frame {aFrame}) - content loaded.");
+                    }
+                    else if (!_useEplSignal.Value && aFrame % 30 == 0)
+                    {
+                        var g = FindGiantCanvas();
+                        if (g != null && CountCR(g) >= _minTotalCR.Value)
+                        {
+                            loadingDone = true;
+                            Logger.LogInfo("[CanvasSplitter] no EPL signal; canvas reached threshold - assuming content loaded.");
+                        }
                     }
                 }
-                if (_bundleComplete)
-                {
-                    loadingDone = true;
-                    Logger.LogInfo($"[CanvasSplitter] EPL OnBundleLoadingComplete fired (frame {aFrame}) - content loaded.");
-                }
-                else if (!_useEplSignal.Value && aFrame % 30 == 0 && CountCR(_giant) >= _minTotalCR.Value)
-                {
-                    loadingDone = true;
-                    Logger.LogInfo("[CanvasSplitter] no EPL signal; canvas reached threshold - assuming content loaded.");
-                }
-            }
-            if (!loadingDone)
-                Logger.LogWarning($"[CanvasSplitter] loading-done wait hit hard cap ({aHardCap}f); proceeding.");
+                if (!loadingDone)
+                    Logger.LogWarning($"[CanvasSplitter] loading-done wait hit hard cap ({aHardCap}f); proceeding.");
 
-            // Phase 2b: wait until the canvas is FULLY built. The shop screens and their
-            // thousands of panels are added after loading (EPL patches CheckPriceScreen.Init /
-            // RestockItemScreen.Init), so the canvas grows from ~2k to ~144k. Split only once
-            // the element count has stopped growing.
-            int lastCR = -1, lastCC = -1, lastChangeFrame = 0, frame = 0;
-            int maxWait = Mathf.Max(1, _maxWaitFrames.Value);
-            int probe = Mathf.Max(1, _probeInterval.Value);
-            while (frame < maxWait)
-            {
-                yield return null;
-                frame++;
-                int cc = _giant.transform.childCount;                    // cheap (O(1))
-                int cr = (frame % probe == 0) ? CountCR(_giant) : lastCR; // expensive, throttled
-                if (frame % probe == 0 && (cr != lastCR || cc != lastCC))
+                // Phase 2b: wait until the REAL canvas is FULLY built. After the event the game
+                // switches to the shop scene (old canvas destroyed, new one created), and the
+                // shop panels are added, growing it from ~2k to ~144k. Re-find every probe.
+                int lastCR = -1, lastCC = -1, lastChangeFrame = 0, frame = 0;
+                int maxWait = Mathf.Max(1, _maxWaitFrames.Value);
+                int probe = Mathf.Max(1, _probeInterval.Value);
+                while (frame < maxWait)
                 {
-                    Logger.LogInfo($"[CanvasSplitter]   building: children {lastCC}->{cc}, CanvasRenderers {lastCR}->{cr}");
-                    lastCR = cr; lastCC = cc; lastChangeFrame = frame;
+                    yield return null;
+                    frame++;
+                    _giant = FindGiantCanvas();
+                    if (_giant == null) continue;   // canvas gone during scene transition; wait
+                    int cc = _giant.transform.childCount;                    // cheap (O(1))
+                    int cr = (frame % probe == 0) ? CountCR(_giant) : lastCR; // expensive, throttled
+                    if (frame % probe == 0 && (cr != lastCR || cc != lastCC))
+                    {
+                        Logger.LogInfo($"[CanvasSplitter]   building: children {lastCC}->{cc}, CanvasRenderers {lastCR}->{cr}");
+                        lastCR = cr; lastCC = cc; lastChangeFrame = frame;
+                    }
+                    else if (cc != lastCC)
+                    {
+                        lastCC = cc; lastChangeFrame = frame;
+                    }
+                    if (lastCR >= _minTotalCR.Value && (frame - lastChangeFrame) >= _settleFrames.Value)
+                        break;
                 }
-                else if (cc != lastCC)
-                {
-                    lastCC = cc; lastChangeFrame = frame; // child count moved; re-sample CR next probe
-                }
-                if (lastCR >= _minTotalCR.Value && (frame - lastChangeFrame) >= _settleFrames.Value)
-                    break; // settled and big enough
-            }
-            if (frame >= maxWait)
-                Logger.LogWarning($"[CanvasSplitter] settle wait hit max ({maxWait}f, CR={lastCR}); splitting anyway.");
+                if (frame >= maxWait)
+                    Logger.LogWarning($"[CanvasSplitter] settle wait hit max ({maxWait}f, CR={lastCR}); splitting anyway.");
 
-            ParseExcludes();
-            LogCensus("BEFORE");
-            ApplySplit();
-            LogCensus("AFTER");
-            yield break;
+                _giant = FindGiantCanvas();
+                if (_giant == null)
+                {
+                    Logger.LogError("[CanvasSplitter] canvas not found at split time - aborting.");
+                    yield break;
+                }
+
+                try
+                {
+                    ParseExcludes();
+                    LogCensus("BEFORE");
+                    ApplySplit();
+                    LogCensus("AFTER");
+                }
+                catch (Exception e)
+                {
+                    Logger.LogError("[CanvasSplitter] split failed: " + e);
+                }
+                yield break;
         }
 
         /// <summary>
