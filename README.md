@@ -25,6 +25,12 @@ canvas pays the full ~144k cost. The per-frame churn source (the tooltip) is alr
 **TooltipStutterFix**. This plugin additionally moves each big screen onto its own canvas, so
 opening/interacting with a screen only rebuilds that screen's canvas instead of all 144k.
 
+> **Use both.** This plugin makes the *screens* cheaper, but the hover stutter you originally
+> reported is caused by the *tooltip* churning the canvas ~100x/sec — that is fixed by
+> **TooltipStutterFix**, not this one. With TooltipStutterFix disabled, the tooltip stays on the
+> (still large) shared canvas, so the hover stutter will remain even after this plugin splits
+> the screens. Enable both for the full fix.
+
 ## Modes
 
 - **`Reparent`** (default) — create a new root `ScreenSpaceOverlay` canvas per qualifying
@@ -49,8 +55,18 @@ opening/interacting with a screen only rebuilds that screen's canvas instead of 
 | `GiantCanvasName` | `Canvas` | The shared canvas to split (falls back to the biggest canvas). |
 | `MinCanvasRenderers` | `2000` | Only split screens with ≥ this many CanvasRenderers. Lower = more moved, higher = less risk. |
 | `ExcludeNames` | (see source) | Comma-separated screen names to skip. Defaults protect path-referenced + mod-created screens. |
-| `ApplyDelayFrames` | `10` | Frames to wait after scene load before splitting (lets other mods cache references). |
+| `ApplyDelayFrames` | `10` | Extra frames to wait after the canvas is found, before the settle wait begins. |
 | `BaseSortingOrder` | `1000` | Base `sortingOrder` for new screen canvases (sibling order added to preserve layering). Keep above the shared canvas (0) and below the tooltip canvas (2000). |
+| `ProbeInterval` | `30` | Frames between canvas-size samples while waiting for the UI to finish building. |
+| `SettleFrames` | `90` | How long the element count must be unchanged before splitting. |
+| `MaxWaitFrames` | `900` | Give up waiting after this and split anyway. |
+| `MinTotalCanvasRenderers` | `5000` | The canvas must reach this many CanvasRenderers before it counts as "built". |
+
+> **Timing matters.** The game + EPL add the shop screens and their thousands of panels
+> *seconds* after the canvas first appears. This plugin waits until the canvas element count
+> **settles** (unchanged for `SettleFrames`) before splitting — otherwise it moves nothing and
+> the fix never applies. You'll see `building: children X->Y, CanvasRenderers A->B` log lines
+> while it waits, then `CENSUS BEFORE` / `CENSUS AFTER`.
 
 ## Will it break anything?
 

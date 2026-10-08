@@ -35,7 +35,7 @@ namespace CanvasSplitter
     /// This plugin only uses Unity types (no game-assembly coupling) and makes no Harmony
     /// patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.0.0")]
+    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.1.0")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -55,6 +55,10 @@ namespace CanvasSplitter
         private ConfigEntry<string> _exclude;
         private ConfigEntry<int> _delayFrames;
         private ConfigEntry<int> _baseSortOrder;
+        private ConfigEntry<int> _probeInterval;
+        private ConfigEntry<int> _settleFrames;
+        private ConfigEntry<int> _maxWaitFrames;
+        private ConfigEntry<int> _minTotalCR;
 
         private Canvas _giant;
         private HashSet<string> _excluded = new HashSet<string>(StringComparer.Ordinal);
@@ -98,9 +102,24 @@ namespace CanvasSplitter
                 "Base sortingOrder for new screen canvases. Original sibling order is added to it to " +
                 "preserve layering. Keep it above the shared canvas (0) and below the tooltip canvas (2000).");
 
+            _probeInterval = Config.Bind("General", "ProbeInterval", 30,
+                "Frames between canvas-size samples while waiting for the UI to finish building. " +
+                "Higher = fewer (cheaper) samples, slower to detect stability.");
+
+            _settleFrames = Config.Bind("General", "SettleFrames", 90,
+                "How long (frames) the canvas element count must be unchanged before it is considered " +
+                "fully built and safe to split.");
+
+            _maxWaitFrames = Config.Bind("General", "MaxWaitFrames", 900,
+                "Give up waiting for stability after this many frames and split anyway.");
+
+            _minTotalCR = Config.Bind("General", "MinTotalCanvasRenderers", 5000,
+                "The shared canvas must reach at least this many CanvasRenderers before it is considered " +
+                "built (guards against splitting a canvas that never grows).");
+
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v1.0.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, Delay={_delayFrames.Value})");
+            Logger.LogInfo($"[CanvasSplitter] v1.1.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, Settle={_settleFrames.Value}f)");
         }
 
         private void ParseExcludes()
@@ -116,28 +135,62 @@ namespace CanvasSplitter
 
         private IEnumerator WaitForScene()
         {
+            // Phase 1: wait for the giant canvas to exist at all.
             while (true)
             {
                 _giant = FindGiantCanvas();
-                if (_giant != null && _giant.transform.childCount >= 3)
-                {
-                    if (!_enabled.Value || _mode.Value == SplitMode.Off)
-                    {
-                        Logger.LogInfo($"[CanvasSplitter] disabled (Enabled={_enabled.Value}, Mode={_mode.Value}) - doing nothing.");
-                        yield break;
-                    }
-
-                    int d = Mathf.Max(0, _delayFrames.Value);
-                    for (int i = 0; i < d; i++) yield return null;
-
-                    ParseExcludes();
-                    LogCensus("BEFORE");
-                    ApplySplit();
-                    LogCensus("AFTER");
-                    yield break;
-                }
+                if (_giant != null && _giant.transform.childCount >= 3) break;
                 yield return null;
             }
+
+            if (!_enabled.Value || _mode.Value == SplitMode.Off)
+            {
+                Logger.LogInfo($"[CanvasSplitter] disabled (Enabled={_enabled.Value}, Mode={_mode.Value}) - doing nothing.");
+                yield break;
+            }
+
+            // optional initial delay
+            for (int i = 0; i < Mathf.Max(0, _delayFrames.Value); i++) yield return null;
+
+            // Phase 2: wait until the canvas is FULLY built. The game + EPL add the shop
+            // screens and their thousands of panels over several seconds after scene load
+            // (EPL patches CheckPriceScreen.Init / RestockItemScreen.Init and runs on scene load),
+            // so we must wait for the element count to settle before splitting - otherwise we
+            // move nothing (the canvas is still tiny) and the fix never applies.
+            int lastCR = -1, lastCC = -1, lastChangeFrame = 0, frame = 0;
+            int maxWait = Mathf.Max(1, _maxWaitFrames.Value);
+            int probe = Mathf.Max(1, _probeInterval.Value);
+            while (frame < maxWait)
+            {
+                yield return null;
+                frame++;
+                int cc = _giant.transform.childCount;                    // cheap (O(1))
+                int cr = (frame % probe == 0) ? CountCR(_giant) : lastCR; // expensive, throttled
+                if (frame % probe == 0 && (cr != lastCR || cc != lastCC))
+                {
+                    Logger.LogInfo($"[CanvasSplitter]   building: children {lastCC}->{cc}, CanvasRenderers {lastCR}->{cr}");
+                    lastCR = cr; lastCC = cc; lastChangeFrame = frame;
+                }
+                else if (cc != lastCC)
+                {
+                    lastCC = cc; lastChangeFrame = frame; // child count moved; re-sample CR next probe
+                }
+                if (lastCR >= _minTotalCR.Value && (frame - lastChangeFrame) >= _settleFrames.Value)
+                    break; // settled and big enough
+            }
+            if (frame >= maxWait)
+                Logger.LogWarning($"[CanvasSplitter] max wait ({maxWait}f) reached (children={lastCC}, CR={lastCR}); splitting anyway.");
+
+            ParseExcludes();
+            LogCensus("BEFORE");
+            ApplySplit();
+            LogCensus("AFTER");
+            yield break;
+        }
+
+        private static int CountCR(Canvas c)
+        {
+            return c.GetComponentsInChildren<CanvasRenderer>(true).Length;
         }
 
         private Canvas FindGiantCanvas()
