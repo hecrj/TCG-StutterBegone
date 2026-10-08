@@ -36,7 +36,7 @@ namespace CanvasSplitter
     /// This plugin only uses Unity types (no game-assembly coupling) and makes no Harmony
     /// patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.2.1")]
+    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.3.0")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -127,7 +127,7 @@ namespace CanvasSplitter
 
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v1.2.1 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value})");
+            Logger.LogInfo($"[CanvasSplitter] v1.3.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value})");
         }
 
         private void ParseExcludes()
@@ -287,6 +287,65 @@ namespace CanvasSplitter
             return c.GetComponentsInChildren<CanvasRenderer>(true).Length;
         }
 
+        /// <summary>
+        /// Adds a GraphicRaycaster to a canvas root (so its UI is clickable) and registers it
+        /// with the game's RaycasterManager so the game's SetUIRaycastEnabled toggles it
+        /// together with the rest. Settings are copied from the shared canvas's raycaster.
+        /// </summary>
+        private void AddAndRegisterRaycaster(GameObject canvasRoot)
+        {
+            try
+            {
+                var rc = canvasRoot.GetComponent<GraphicRaycaster>();
+                if (rc == null)
+                {
+                    rc = canvasRoot.AddComponent<GraphicRaycaster>();
+                    var src = _giant != null ? _giant.GetComponent<GraphicRaycaster>() : null;
+                    if (src != null)
+                    {
+                        rc.blockingObjects = src.blockingObjects;
+                        rc.ignoreReversedGraphics = src.ignoreReversedGraphics;
+                    }
+                }
+                RegisterWithRaycasterManager(rc);
+            }
+            catch (Exception e)
+            {
+                Logger.LogWarning("[CanvasSplitter] failed to add raycaster to " + canvasRoot.name + ": " + e.Message);
+            }
+        }
+
+        /// <summary>
+        /// Best-effort: add a GraphicRaycaster to RaycasterManager.Instance.m_RaycasterList
+        /// (via reflection, no hard game-assembly dependency) so the game manages it.
+        /// </summary>
+        private void RegisterWithRaycasterManager(GraphicRaycaster rc)
+        {
+            try
+            {
+                Type rmType = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try { rmType = asm.GetType("RaycasterManager"); } catch { }
+                    if (rmType != null) break;
+                }
+                if (rmType == null) return;
+                var instProp = rmType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+                if (instProp == null) return;
+                object inst = instProp.GetValue(null);
+                if (inst == null) return;
+                var listField = rmType.GetField("m_RaycasterList", BindingFlags.Public | BindingFlags.Instance);
+                if (listField == null) return;
+                var list = listField.GetValue(inst) as System.Collections.IList;
+                if (list == null) return;
+                if (!list.Contains(rc)) list.Add(rc);
+            }
+            catch (Exception e)
+            {
+                Logger.LogWarning("[CanvasSplitter] could not register raycaster with RaycasterManager: " + e.Message);
+            }
+        }
+
         private Canvas FindGiantCanvas()
         {
             var go = GameObject.Find(_giantName.Value);
@@ -363,6 +422,11 @@ namespace CanvasSplitter
                     s.dynamicPixelsPerUnit = src.dynamicPixelsPerUnit;
                 }
 
+                // CRITICAL: a ScreenSpaceOverlay canvas needs a GraphicRaycaster for its UI to
+                // be clickable/hoverable. Without one the screen renders but the EventSystem
+                // can't raycast it (the reported "not interactable" bug).
+                AddAndRegisterRaycaster(go);
+
                 screen.SetParent(go.transform, worldPositionStays: false);
                 int after = c.GetComponentsInChildren<CanvasRenderer>(true).Length;
                 Logger.LogInfo($"[CanvasSplitter]   REPARENT '{screen.name}' CR {cr}->{after} sort={sortOrder}  {oldPath} -> {GetPath(screen)}");
@@ -385,6 +449,7 @@ namespace CanvasSplitter
                 c.pixelPerfect = false;
                 // Intentionally NO CanvasScaler here: the nested canvas inherits the parent's
                 // scaling, so the screen should render exactly as before.
+                AddAndRegisterRaycaster(screen.gameObject);
                 Logger.LogInfo($"[CanvasSplitter]   NEST '{screen.name}' CR={cr} sort={sortOrder} (in place, path unchanged: {GetPath(screen)})");
             }
             catch (Exception e)

@@ -76,6 +76,15 @@ opening/interacting with a screen only rebuilds that screen's canvas instead of 
 > fired`, then `building: children X->Y, CanvasRenderers A->B` lines, then
 > `CENSUS BEFORE` / `CENSUS AFTER`.
 
+## How it keeps screens interactive
+A `ScreenSpaceOverlay` canvas only receives clicks/hovers if it has a
+**`GraphicRaycaster`**. This plugin adds one to every canvas it creates (settings
+copied from the shared canvas) and **registers it with the game's
+`RaycasterManager`** (via reflection) so the game's `SetUIRaycastEnabled` toggles it
+together with the rest. (Earlier versions omitted the raycaster, which is why
+reparented screens like the price-check and board-game shop rendered but were not
+clickable.)
+
 ## Will it break anything?
 
 - **`Reparent` (default): low risk.** Reparenting is the same proven move as the tooltip fix.
