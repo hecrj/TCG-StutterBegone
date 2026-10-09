@@ -63,7 +63,7 @@ Screens listed in `ExcludeNames` are left on the shared canvas.
 | `ApplyDelayFrames` | `10` | Extra frames to wait after the canvas is found, before the settle wait begins. |
 | `BaseSortingOrder` | `1000` | Base `sortingOrder`; each moved screen gets this + its original sibling index. |
 | `ProbeInterval` | `30` | Frames between canvas-size samples while waiting for the UI to finish building. |
-| `SettleFrames` | `90` | How long the element count must be unchanged before splitting. |
+| `SettleFrames` | `240` | How long the element count must be unchanged before splitting. |
 | `MaxWaitFrames` | `900` | Give up the settle wait after this and split anyway (also scales the loading-done hard cap). |
 | `MinTotalCanvasRenderers` | `5000` | The canvas must reach this many CanvasRenderers before it counts as "built". |
 | `UseEplSignal` | `true` | Use EPL's `OnBundleLoadingComplete` event to detect the end of loading. |

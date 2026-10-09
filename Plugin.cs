@@ -37,7 +37,7 @@ namespace StutterBegone
     ///
     /// This plugin makes no Harmony patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "2.1.1")]
+    [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "2.1.2")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -102,7 +102,7 @@ namespace StutterBegone
                 "Frames between canvas-size samples while waiting for the UI to finish building. " +
                 "Higher = fewer (cheaper) samples, slower to detect stability.");
 
-            _settleFrames = Config.Bind("General", "SettleFrames", 90,
+            _settleFrames = Config.Bind("General", "SettleFrames", 240,
                 "How long (frames) the canvas element count must be unchanged before it is considered " +
                 "fully built and safe to split.");
 
@@ -119,7 +119,7 @@ namespace StutterBegone
 
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[StutterBegone] v2.1.1 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
+            Logger.LogInfo($"[StutterBegone] v2.1.2 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
         }
 
         private void ParseExcludes()
