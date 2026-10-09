@@ -70,7 +70,8 @@ Screens listed in `ExcludeNames` are left on the shared canvas.
 
 > **Timing (two gates).** The loading screen can last well over 15 s; during it the shared
 > canvas only holds the base UI. The plugin waits for (1) EPL's `OnBundleLoadingComplete`
-> (hot/cold, via reflection; falls back to canvas size if no EPL) and then (2) the element
+> (hot/cold, linked directly to `EnhancedPrefabLoader.API` per the EPL guide; falls back to
+> canvas size if no EPL) and then (2) the element
 > count to **settle** (unchanged for `SettleFrames`), because the shop panels are added after
 > loading. Log: `subscribed to EPL OnBundleLoadingComplete` → `EPL OnBundleLoadingComplete
 > fired` → `building: …` → `CENSUS BEFORE` / `CENSUS AFTER`.
@@ -101,3 +102,10 @@ Delete `BepInEx/plugins/StutterBegone/`. No game or mod files are modified.
 dotnet build -c Release -p:GameDir="C:/path/to/TCG Card Shop Simulator" -o out
 ```
 Deploy `out/StutterBegone.dll` to `BepInEx/plugins/StutterBegone/`.
+
+## EPL dependency
+
+This plugin links `EnhancedPrefabLoader.API.dll` (per the [EPL guide](https://prefabloader-187e53.gitlab.io/index.html))
+and declares EPL as a **soft dependency** (`[BepInDependency("EnhancedPrefabLoader", SoftDependency)]`).
+It uses `Epl.Api.Events.OnBundleLoadingComplete` to time the split. If EPL is not installed, the
+plugin still loads and falls back to canvas-size heuristics (the `UseEplSignal` path).

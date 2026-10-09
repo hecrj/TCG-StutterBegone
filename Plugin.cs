@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
+using EnhancedPrefabLoader.API;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -37,6 +38,9 @@ namespace StutterBegone
     ///
     /// This plugin makes no Harmony patches. It runs once per scene load.
     /// </summary>
+    // EPL is a soft dependency: if it's installed it loads first (so Epl.IsAvailable is true
+    // when we run); if it's missing we still load and fall back to canvas-size heuristics.
+    [BepInDependency("EnhancedPrefabLoader", BepInDependency.DependencyFlags.SoftDependency)]
     [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "1.0.0")]
     public class Plugin : BaseUnityPlugin
     {
@@ -236,40 +240,23 @@ namespace StutterBegone
         }
 
         /// <summary>
-        /// Subscribes to EPL's OnBundleLoadingComplete via reflection (no hard compile-time
-        /// dependency on the EPL API assembly). Returns true once subscribed (the event is
-        /// hot/cold, so it fires immediately if loading already finished).
+        /// Subscribes to EPL's OnBundleLoadingComplete (linked directly, per the EPL guide).
+        /// The event is hot/cold - it fires immediately if loading already finished. Returns
+        /// true once subscribed. If EPL (or its API assembly) is not installed, returns false
+        /// and the plugin falls back to canvas-size heuristics.
         /// </summary>
         private bool TrySubscribeBundleComplete()
         {
             try
             {
-                Type eplType = null;
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    try { eplType = asm.GetType("EnhancedPrefabLoader.API.Epl"); } catch { }
-                    if (eplType != null) break;
-                }
-                if (eplType == null) return false;
-
-                var isAvail = eplType.GetProperty("IsAvailable", BindingFlags.Public | BindingFlags.Static);
-                if (isAvail == null || !Convert.ToBoolean(isAvail.GetValue(null))) return false;
-
-                object api = eplType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static).GetValue(null);
-                if (api == null) return false;
-
-                object events = api.GetType().GetProperty("Events").GetValue(api);
-                if (events == null) return false;
-
-                var evt = events.GetType().GetEvent("OnBundleLoadingComplete");
-                if (evt == null) return false;
-
-                evt.AddEventHandler(events, new Action(() => _bundleComplete = true));
+                if (!Epl.IsAvailable) return false;
+                Epl.Api.Events.OnBundleLoadingComplete += () => _bundleComplete = true;
                 return true;
             }
             catch (Exception e)
             {
-                Logger.LogWarning("[StutterBegone] EPL OnBundleLoadingComplete subscribe failed: " + e.Message);
+                // EPL API assembly not resolvable (EPL not installed) or other error.
+                Logger.LogWarning("[StutterBegone] EPL API unavailable: " + e.Message);
                 return false;
             }
         }
