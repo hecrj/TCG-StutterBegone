@@ -1,6 +1,12 @@
-# StutterBegone (TCG Card Shop Simulator)
+<div align="center">
 
-Fixes stuttering when sweeping your mouse over shelves and other items, and reduces it in other UI screens.
+![StutterBegone](stutter-begone.png)
+
+# StutterBegone
+
+Fixes stuttering when sweeping your mouse over shelves and other items in TCG Card Shop Simulator.
+
+</div>
 
 ## Why
 
