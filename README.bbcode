@@ -55,7 +55,7 @@ For each top-level child of the shared canvas (in original sibling order):
 Screens listed in [font=monospace]ExcludeNames[/font] are left on the shared canvas.
 
 [b][size=5]Runtime canvas watcher[/size][/b]
-Some mods build overlays at runtime (e.g. [font=monospace]Binder Overhaul[/font]'s filter/sort modal). These new canvases land [b]below[/b] the reparented screens (which sit at [font=monospace]BaseSortingOrder[/font]+), so the mod's UI ends up hidden behind a screen. A watcher catches each new top-level canvas created after the split and shifts it to [font=monospace]BaseSortingOrder + (top-level child count) + its own sortingOrder[/font], which lands it above all our screens while preserving the relative order among mod-created canvases. Toggle with [font=monospace]WatchCanvases[/font].
+Some mods build overlays at runtime (e.g. [font=monospace]Binder Overhaul[/font]'s filter/sort modal). These new canvases land [b]below[/b] the reparented screens (which sit at [font=monospace]BaseSortingOrder[/font]+), so the mod's UI ends up hidden behind a screen. Set a key in [font=monospace]RescanCanvasesKey[/font] (no default) and press it to scan for new top-level canvases created after the split and shift each to [font=monospace]BaseSortingOrder + (top-level child count) + its own sortingOrder[/font], which lands it above all our screens while preserving the relative order among mod-created canvases.
 
 [b][size=5]Config ([font=monospace]BepInEx/config/hecrj.stutter.begone.cfg[/font])[/size][/b]
 [table][tr][th]Key[/th]
@@ -102,9 +102,9 @@ Some mods build overlays at runtime (e.g. [font=monospace]Binder Overhaul[/font]
 [td][font=monospace]true[/font][/td]
 [td]Use EPL's [font=monospace]OnBundleLoadingComplete[/font] event to detect the end of loading.[/td]
 [/tr]
-[tr][td][font=monospace]WatchCanvases[/font][/td]
-[td][font=monospace]true[/font][/td]
-[td]Watch for new runtime canvases (e.g. a mod's overlay/modal) and shift them above the reparented screens so they stay on top. [font=monospace]false[/font] = don't watch.[/td]
+[tr][td][font=monospace]RescanCanvasesKey[/font][/td]
+[td][font=monospace]None[/font][/td]
+[td]Key to press to rescan for new runtime canvases (e.g. a mod's overlay/modal) and shift them above the reparented screens. No default; set a key to enable.[/td]
 [/tr]
 [/table]
 [quote][b]Timing (two gates).[/b] The loading screen can last well over 15 s; during it the shared canvas only holds the base UI. The plugin waits for (1) EPL's [font=monospace]OnBundleLoadingComplete[/font] (hot/cold, linked directly to [font=monospace]EnhancedPrefabLoader.API[/font] per the EPL guide; falls back to canvas size if no EPL) and then (2) the element count to [b]settle[/b] (unchanged for [font=monospace]SettleFrames[/font]), because the shop panels are added after loading. Log: [font=monospace]subscribed to EPL OnBundleLoadingComplete[/font] → [font=monospace]EPL OnBundleLoadingComplete fired[/font] → [font=monospace]building: …[/font] → [font=monospace]CENSUS BEFORE[/font] / [font=monospace]CENSUS AFTER[/font].[/quote]

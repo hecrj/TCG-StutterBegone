@@ -49,10 +49,10 @@ Screens listed in `ExcludeNames` are left on the shared canvas.
 
 Some mods build overlays at runtime (e.g. `Binder Overhaul`'s filter/sort modal). These new
 canvases land **below** the reparented screens (which sit at `BaseSortingOrder`+), so the mod's
-UI ends up hidden behind a screen. A watcher catches each new top-level canvas created after
-the split and shifts it to `BaseSortingOrder + (top-level child count) + its own sortingOrder`,
-which lands it above all our screens while preserving the relative order among mod-created
-canvases. Toggle with `WatchCanvases`.
+UI ends up hidden behind a screen. Set a key in `RescanCanvasesKey` (no default) and press it
+to scan for new top-level canvases created after the split and shift each to `BaseSortingOrder
++ (top-level child count) + its own sortingOrder`, which lands it above all our screens while
+preserving the relative order among mod-created canvases.
 
 ## Config (`BepInEx/config/hecrj.stutter.begone.cfg`)
 
@@ -68,7 +68,7 @@ canvases. Toggle with `WatchCanvases`.
 | `MaxWaitFrames` | `900` | Give up the settle wait after this and split anyway (also scales the loading-done hard cap). |
 | `MinTotalCanvasRenderers` | `5000` | The canvas must reach this many CanvasRenderers before it counts as "built". |
 | `UseEplSignal` | `true` | Use EPL's `OnBundleLoadingComplete` event to detect the end of loading. |
-| `WatchCanvases` | `true` | Watch for new runtime canvases (e.g. a mod's overlay/modal) and shift them above the reparented screens so they stay on top. `false` = don't watch. |
+| `RescanCanvasesKey` | `None` | Key to press to rescan for new runtime canvases (e.g. a mod's overlay/modal) and shift them above the reparented screens. No default; set a key to enable. |
 
 > **Timing (two gates).** The loading screen can last well over 15 s; during it the shared
 > canvas only holds the base UI. The plugin waits for (1) EPL's `OnBundleLoadingComplete`
