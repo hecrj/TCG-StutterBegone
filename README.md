@@ -1,6 +1,6 @@
 <div align="center">
 
-![StutterBegone](stutter-begone.png)
+<img alt="StutterBegone" src="stutter-begone.png" width="300px" />
 
 # StutterBegone
 
