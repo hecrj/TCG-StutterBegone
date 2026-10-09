@@ -53,6 +53,12 @@ namespace StutterBegone
         private ConfigEntry<bool> _useEplSignal;
 
         private Canvas _giant;
+        // Canvas watcher state: ourMaxSort = first sortingOrder slot above ALL our
+        // reparented screens (= BaseSortingOrder + totalTopLevelChildren). New runtime
+        // canvases are shifted to ourMaxSort + their own sortingOrder (preserves relative order).
+        private int _ourMaxSort;
+        private HashSet<GameObject> _knownCanvases;
+        private bool _watcherStarted;
         private bool _bundleComplete;
         private bool _eplSubscribed;
         private HashSet<string> _excluded = new HashSet<string>(StringComparer.Ordinal);
@@ -364,6 +370,54 @@ namespace StutterBegone
             }
 
             Logger.LogInfo($"[StutterBegone] done: moved={moved} skippedExcluded={skippedExcl}");
+
+            // Watch for NEW root canvases created at runtime (e.g. a mod's modal) and shift
+            // them above all our reparented screens, preserving their relative order:
+            //   newSort = BaseSortingOrder + totalTopLevelChildren + canvas.sortingOrder
+            _ourMaxSort = _baseSortOrder.Value + n;
+            _knownCanvases = new HashSet<GameObject>();
+            foreach (var c in FindObjectsOfType<Canvas>())
+                if (c != null) _knownCanvases.Add(c.gameObject);
+            if (!_watcherStarted)
+            {
+                _watcherStarted = true;
+                StartCoroutine(WatchNewCanvases());
+            }
+            Logger.LogInfo($"[StutterBegone] canvas watcher armed (ourMaxSort={_ourMaxSort}, known={_knownCanvases.Count} canvases at split)");
+        }
+
+        private IEnumerator WatchNewCanvases()
+        {
+            int counter = 0;
+            while (true)
+            {
+                yield return null;
+                if (++counter % 5 != 0) continue; // check every 5 frames
+                Canvas[] all = FindObjectsOfType<Canvas>();
+                for (int i = 0; i < all.Length; i++)
+                {
+                    var c = all[i];
+                    if (c == null) continue;
+                    if (_knownCanvases.Contains(c.gameObject)) continue;
+                    if (!IsRootCanvas(c)) continue; // nested canvases stay unmarked (re-checked each poll)
+                    _knownCanvases.Add(c.gameObject);
+                    int old = c.sortingOrder;
+                    int newSort = _ourMaxSort + old;
+                    c.sortingOrder = newSort;
+                    Logger.LogInfo($"[StutterBegone]   shifted new runtime canvas '{c.gameObject.name}' sort {old} -> {newSort}");
+                }
+            }
+        }
+
+        private static bool IsRootCanvas(Canvas c)
+        {
+            Transform t = c.transform.parent;
+            while (t != null)
+            {
+                if (t.GetComponent<Canvas>() != null) return false; // has an ancestor canvas -> nested
+                t = t.parent;
+            }
+            return true;
         }
 
         private void ReparentScreen(Transform screen, int cr, int sortOrder)
