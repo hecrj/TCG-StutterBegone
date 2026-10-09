@@ -1,7 +1,6 @@
 # StutterBegone (TCG Card Shop Simulator)
 
-BepInEx 5 plugin. Splits the game's giant shared UI canvas into one small canvas per
-screen, which is the root fix for the hover stutter. (Formerly "Canvas Splitter".)
+Fixes stuttering when sweeping your mouse over shelves and other items, and reduces it in other UI screens.
 
 ## Why
 
