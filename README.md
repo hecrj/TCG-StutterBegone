@@ -52,7 +52,7 @@ Screens listed in `ExcludeNames` are left on the shared canvas.
   hierarchy/path change, so no `GameObject.Find` can break; verify visuals in-game).
 - **`Off`** — do nothing.
 
-## Config (`BepInEx/config/hover.stutter.begone.cfg`)
+## Config (`BepInEx/config/hecrj.stutter.begone.cfg`)
 
 | Key | Default | Meaning |
 |---|---|---|

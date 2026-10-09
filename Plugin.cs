@@ -37,7 +37,7 @@ namespace StutterBegone
     ///
     /// This plugin makes no Harmony patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hover.stutter.begone", "StutterBegone", "2.1.0")]
+    [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "2.1.1")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -119,7 +119,7 @@ namespace StutterBegone
 
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[StutterBegone] v2.0.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
+            Logger.LogInfo($"[StutterBegone] v2.1.1 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
         }
 
         private void ParseExcludes()
