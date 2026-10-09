@@ -1,87 +1,121 @@
-[b][size=6]StutterBegone (TCG Card Shop Simulator)[/size][/b]
-
-BepInEx 5 plugin. Splits the game's giant shared UI canvas into one small canvas per screen, which is the root fix for the hover stutter. (Formerly "Canvas Splitter".)
+[b][size=6]StutterBegone[/size][/b]
+Fixes stuttering when sweeping your mouse over shelves and other items, and reduces it in other UI screens.
 
 [b][size=5]Why[/size][/b]
-
 The game pools [b]every[/b] full-screen UI under one shared [font=monospace]ScreenSpaceOverlay[/font] canvas ([font=monospace]Canvas[/font]). With a full mod set that canvas holds ~144,000–150,000 [font=monospace]CanvasRenderer[/font] components (only ~50–140 active at a time):
-
-[table]
-[tr][th]Subtree[/th][th]CanvasRenderers[/th][th]Notes[/th][/tr]
-[tr][td][font=monospace]CheckPriceScreen_Grp[/font][/td][td]~47,800[/td][td]vanilla screen, grown by EPL (one panel per card/item)[/td][/tr]
-[tr][td][font=monospace]RestockItemScreen_Grp[/font][/td][td]~26,700[/td][td]vanilla screen, [b]path-referenced by EPL/ShopOS[/b][/td][/tr]
-[tr][td][font=monospace]RestockItemBoardGameScreen_Grp[/font][/td][td]~26,700[/td][td]vanilla screen, grown by EPL[/td][/tr]
-[tr][td][font=monospace]PlayCardSetUIScreenGrp[/font][/td][td]~10,800[/td][td][/td][/tr]
-[tr][td][font=monospace]DeckEditCanvasGrp[/font][/td][td]~5,800[/td][td][/td][/tr]
-[tr][td][font=monospace]FurnitureShopUIScreen_Grp[/font][/td][td]~4,700[/td][td][/td][/tr]
-[tr][td]… ~50 more screens …[/td][td][/td][td][/td][/tr]
+[table][tr][th]Subtree[/th]
+[th]CanvasRenderers[/th]
+[th]Notes[/th]
+[/tr]
+[tr][td][font=monospace]CheckPriceScreen_Grp[/font][/td]
+[td]~47,800[/td]
+[td]vanilla screen, grown by EPL (one panel per card/item)[/td]
+[/tr]
+[tr][td][font=monospace]RestockItemScreen_Grp[/font][/td]
+[td]~26,700[/td]
+[td]vanilla screen, [b]path-referenced by EPL/ShopOS[/b][/td]
+[/tr]
+[tr][td][font=monospace]RestockItemBoardGameScreen_Grp[/font][/td]
+[td]~26,700[/td]
+[td]vanilla screen, grown by EPL[/td]
+[/tr]
+[tr][td][font=monospace]PlayCardSetUIScreenGrp[/font][/td]
+[td]~10,800[/td]
+[td][/td]
+[/tr]
+[tr][td][font=monospace]DeckEditCanvasGrp[/font][/td]
+[td]~5,800[/td]
+[td][/td]
+[/tr]
+[tr][td][font=monospace]FurnitureShopUIScreen_Grp[/font][/td]
+[td]~4,700[/td]
+[td][/td]
+[/tr]
+[tr][td]… ~50 more screens …[/td]
+[td][/td]
+[td][/td]
+[/tr]
 [/table]
-
 Unity invalidates and rebuilds at the [b]canvas[/b] granularity, so anything that dirties that canvas pays the full ~144k cost. Two things dirty it:
-
 [list=1]
-[*][b]The tooltip[/b] (per-frame churn) — every hover over a shelf item adds/removes tooltip elements, rebuilding the canvas ~100x/sec.
-[*][b]The big screens[/b] — opening/interacting with a screen rebuilds all ~144k.
+[*][b]The tooltip[/b] (per-frame churn) — every hover over a shelf item adds/removes tooltip elements, rebuilding the canvas ~100x/sec.[/*]
+[*][b]The big screens[/b] — opening/interacting with a screen rebuilds all ~144k.[/*]
 [/list]
-
-This plugin reparents [b]every[/b] top-level screen (and the tooltip) onto its own tiny canvas, so a change only rebuilds that screen's canvas. A tooltip transition then rebuilds ~20 elements instead of ~144k → the hover stutter is gone. [b]Tooltips stay fully visible.[/b]
+This plugin reparents [b]every[/b] top-level screen onto its own tiny canvas, so a change only rebuilds that screen's canvas. A tooltip transition then rebuilds ~20 elements instead of ~144k → the hover stutter is gone. [b]Tooltips stay fully visible.[/b]
 
 [b][size=5]How it works[/size][/b]
-
 For each top-level child of the shared canvas (in original sibling order):
-
 [list=1]
-[*] Create a new root [font=monospace]ScreenSpaceOverlay[/font] canvas named [font=monospace]StutterBegone_<screen>[/font].
-[*] Set [font=monospace]sortingOrder = BaseSortingOrder + (original sibling index)[/font]. This preserves the [b]exact original layering[/b] — an overlay that was in front of a screen (e.g. the shopping cart) stays in front of it after both are moved.
-[*] Copy the shared canvas's [font=monospace]CanvasScaler[/font] (so it renders identically).
-[*] Add a [font=monospace]GraphicRaycaster[/font] (so the UI stays clickable) and register it with the game's [font=monospace]RaycasterManager[/font] so the game's [font=monospace]SetUIRaycastEnabled[/font] toggles it with the rest.
-[*] Move the screen onto the new canvas.
+[*]Create a new root [font=monospace]ScreenSpaceOverlay[/font] canvas named [font=monospace]StutterBegone_<screen>[/font].[/*]
+[*]Set [font=monospace]sortingOrder = BaseSortingOrder + (original sibling index)[/font]. This preserves the [b]exact original layering[/b] — an overlay that was in front of a screen (e.g. the shopping cart) stays in front of it after both are moved.[/*]
+[*]Copy the shared canvas's [font=monospace]CanvasScaler[/font] (so it renders identically).[/*]
+[*]Add a [font=monospace]GraphicRaycaster[/font] (so the UI stays clickable) and register it with the game's [font=monospace]RaycasterManager[/font] so the game's [font=monospace]SetUIRaycastEnabled[/font] toggles it with the rest.[/*]
+[*]Move the screen onto the new canvas.[/*]
 [/list]
-
 Screens listed in [font=monospace]ExcludeNames[/font] are left on the shared canvas.
 
+[b][size=5]Runtime canvas watcher[/size][/b]
+Some mods build overlays at runtime (e.g. [font=monospace]Binder Overhaul[/font]'s filter/sort modal). These new canvases land [b]below[/b] the reparented screens (which sit at [font=monospace]BaseSortingOrder[/font]+), so the mod's UI ends up hidden behind a screen. A watcher catches each new top-level canvas created after the split and shifts it to [font=monospace]BaseSortingOrder + (top-level child count) + its own sortingOrder[/font], which lands it above all our screens while preserving the relative order among mod-created canvases. Toggle with [font=monospace]WatchCanvases[/font].
+
 [b][size=5]Config ([font=monospace]BepInEx/config/hecrj.stutter.begone.cfg[/font])[/size][/b]
-
-[table]
-[tr][th]Key[/th][th]Default[/th][th]Meaning[/th][/tr]
-[tr][td][font=monospace]Enabled[/font][/td][td][font=monospace]true[/font][/td][td]Master switch. False = original (single giant canvas) behavior.[/td][/tr]
-[tr][td][font=monospace]GiantCanvasName[/font][/td][td][font=monospace]Canvas[/font][/td][td]The shared canvas to split (falls back to the biggest canvas).[/td][/tr]
-[tr][td][font=monospace]ExcludeNames[/font][/td][td](empty)[/td][td]Comma-separated screen names to leave on the shared canvas. Empty = reparent everything. Add a name here if a screen breaks.[/td][/tr]
-[tr][td][font=monospace]ApplyDelayFrames[/font][/td][td][font=monospace]10[/font][/td][td]Extra frames to wait after the canvas is found, before the settle wait begins.[/td][/tr]
-[tr][td][font=monospace]BaseSortingOrder[/font][/td][td][font=monospace]1000[/font][/td][td]Base [font=monospace]sortingOrder[/font]; each moved screen gets this + its original sibling index.[/td][/tr]
-[tr][td][font=monospace]ProbeInterval[/font][/td][td][font=monospace]30[/font][/td][td]Frames between canvas-size samples while waiting for the UI to finish building.[/td][/tr]
-[tr][td][font=monospace]SettleFrames[/font][/td][td][font=monospace]240[/font][/td][td]How long the element count must be unchanged before splitting.[/td][/tr]
-[tr][td][font=monospace]MaxWaitFrames[/font][/td][td][font=monospace]900[/font][/td][td]Give up the settle wait after this and split anyway (also scales the loading-done hard cap).[/td][/tr]
-[tr][td][font=monospace]MinTotalCanvasRenderers[/font][/td][td][font=monospace]5000[/font][/td][td>The canvas must reach this many CanvasRenderers before it counts as "built".[/td][/tr]
-[tr][td][font=monospace]UseEplSignal[/font][/td][td][font=monospace]true[/font][/td][td]Use EPL's [font=monospace]OnBundleLoadingComplete[/font] event to detect the end of loading.[/td][/tr]
+[table][tr][th]Key[/th]
+[th]Default[/th]
+[th]Meaning[/th]
+[/tr]
+[tr][td][font=monospace]Enabled[/font][/td]
+[td][font=monospace]true[/font][/td]
+[td]Master switch.[/td]
+[/tr]
+[tr][td][font=monospace]GiantCanvasName[/font][/td]
+[td][font=monospace]Canvas[/font][/td]
+[td]The shared canvas to split (falls back to the biggest canvas).[/td]
+[/tr]
+[tr][td][font=monospace]ExcludeNames[/font][/td]
+[td](empty)[/td]
+[td]Comma-separated screen names to leave on the shared canvas. Empty = reparent everything. Add a name here if a screen breaks.[/td]
+[/tr]
+[tr][td][font=monospace]ApplyDelayFrames[/font][/td]
+[td][font=monospace]10[/font][/td]
+[td]Extra frames to wait after the canvas is found, before the settle wait begins.[/td]
+[/tr]
+[tr][td][font=monospace]BaseSortingOrder[/font][/td]
+[td][font=monospace]100[/font][/td]
+[td]Base [font=monospace]sortingOrder[/font]; each moved screen gets this + its original sibling index.[/td]
+[/tr]
+[tr][td][font=monospace]ProbeInterval[/font][/td]
+[td][font=monospace]30[/font][/td]
+[td]Frames between canvas-size samples while waiting for the UI to finish building.[/td]
+[/tr]
+[tr][td][font=monospace]SettleFrames[/font][/td]
+[td][font=monospace]240[/font][/td]
+[td]How long the element count must be unchanged before splitting.[/td]
+[/tr]
+[tr][td][font=monospace]MaxWaitFrames[/font][/td]
+[td][font=monospace]900[/font][/td]
+[td]Give up the settle wait after this and split anyway (also scales the loading-done hard cap).[/td]
+[/tr]
+[tr][td][font=monospace]MinTotalCanvasRenderers[/font][/td]
+[td][font=monospace]5000[/font][/td]
+[td]The canvas must reach this many CanvasRenderers before it counts as "built".[/td]
+[/tr]
+[tr][td][font=monospace]UseEplSignal[/font][/td]
+[td][font=monospace]true[/font][/td]
+[td]Use EPL's [font=monospace]OnBundleLoadingComplete[/font] event to detect the end of loading.[/td]
+[/tr]
+[tr][td][font=monospace]WatchCanvases[/font][/td]
+[td][font=monospace]true[/font][/td]
+[td]Watch for new runtime canvases (e.g. a mod's overlay/modal) and shift them above the reparented screens so they stay on top. [font=monospace]false[/font] = don't watch.[/td]
+[/tr]
 [/table]
-
-[quote]
-[b]Timing (two gates).[/b] The loading screen can last well over 15 s; during it the shared canvas only holds the base UI. The plugin waits for (1) EPL's [font=monospace]OnBundleLoadingComplete[/font] (hot/cold, linked directly to [font=monospace]EnhancedPrefabLoader.API[/font] per the EPL guide; falls back to canvas size if no EPL) and then (2) the element count to [b]settle[/b] (unchanged for [font=monospace]SettleFrames[/font]), because the shop panels are added after loading. Log: [font=monospace]subscribed to EPL OnBundleLoadingComplete[/font] → [font=monospace]EPL OnBundleLoadingComplete fired[/font] → [font=monospace]building: …[/font] → [font=monospace]CENSUS BEFORE[/font] / [font=monospace]CENSUS AFTER[/font].
-[/quote]
+[quote][b]Timing (two gates).[/b] The loading screen can last well over 15 s; during it the shared canvas only holds the base UI. The plugin waits for (1) EPL's [font=monospace]OnBundleLoadingComplete[/font] (hot/cold, linked directly to [font=monospace]EnhancedPrefabLoader.API[/font] per the EPL guide; falls back to canvas size if no EPL) and then (2) the element count to [b]settle[/b] (unchanged for [font=monospace]SettleFrames[/font]), because the shop panels are added after loading. Log: [font=monospace]subscribed to EPL OnBundleLoadingComplete[/font] → [font=monospace]EPL OnBundleLoadingComplete fired[/font] → [font=monospace]building: …[/font] → [font=monospace]CENSUS BEFORE[/font] / [font=monospace]CENSUS AFTER[/font].[/quote]
 
 [b][size=5]Known reference constraints (why you may need to exclude a screen)[/size][/b]
-
 Some code locates screens [b]by path or as a direct child of the shared canvas[/b]:
-
 [list]
-[*] [font=monospace]GameObject.Find("Canvas/RestockItemScreen_Grp")[/font] — EPL + ShopOS, [b]once at custom-shop setup[/b] (to clone the vanilla restock screen). Runs before the split, so it's usually safe to reparent — but it's the one to exclude first if a custom shop misbehaves.
-[*] [font=monospace]this.transform.parent.Find("RestockItemAddToCartScreen")[/font] / [font=monospace]…("RestockItemCheckoutScreen")[/font] — EPL/CollectionTracker, in the [b]custom shop clone's [font=monospace]Awake()[/font][/b], which runs when the shop is first [b]opened[/b] (at runtime, after the split). Reparenting the cart/checkout can null these. Exclude [font=monospace]RestockItemAddToCartScreen[/font] and [font=monospace]RestockItemCheckoutScreen[/font] if a custom shop's cart stops working.
+[*][font=monospace]GameObject.Find("Canvas/RestockItemScreen_Grp")[/font] — EPL + ShopOS, [b]once at custom-shop setup[/b] (to clone the vanilla restock screen). Runs before the split, so it's usually safe to reparent — but it's the one to exclude first if a custom shop misbehaves.[/*]
+[*][font=monospace]this.transform.parent.Find("RestockItemAddToCartScreen")[/font] / [font=monospace]…("RestockItemCheckoutScreen")[/font] — EPL/CollectionTracker, in the [b]custom shop clone's [font=monospace]Awake()[/font][/b], which runs when the shop is first [b]opened[/b] (at runtime, after the split). Reparenting the cart/checkout can null these. Exclude [font=monospace]RestockItemAddToCartScreen[/font] and [font=monospace]RestockItemCheckoutScreen[/font] if a custom shop's cart stops working.[/*]
 [/list]
-
 If a screen breaks, add its [b]exact name[/b] (the top-level child name, see the [font=monospace]REPARENT '…'[/font] log lines) to [font=monospace]ExcludeNames[/font] and restart.
 
 [b][size=5]Uninstall[/size][/b]
-
 Delete [font=monospace]BepInEx/plugins/StutterBegone/[/font]. No game or mod files are modified.
-
-[b][size=5]Building[/size][/b]
-
-[code]
-dotnet build -c Release -p:GameDir="C:/path/to/TCG Card Shop Simulator" -o out
-[/code]
-Deploy [font=monospace]out/StutterBegone.dll[/font] to [font=monospace]BepInEx/plugins/StutterBegone/[/font].
-
-[b][size=5]EPL dependency[/size][/b]
-
-This plugin links [font=monospace]EnhancedPrefabLoader.API.dll[/font] (per the [url=https://prefabloader-187e53.gitlab.io/index.html]EPL guide[/url]) and declares EPL as a [b]soft dependency[/b] (a [font=monospace]BepInDependency[/font] attribute flagged [font=monospace]SoftDependency[/font]). It uses [font=monospace]Epl.Api.Events.OnBundleLoadingComplete[/font] to time the split. If EPL is not installed, the plugin still loads and falls back to canvas-size heuristics (the [font=monospace]UseEplSignal[/font] path).

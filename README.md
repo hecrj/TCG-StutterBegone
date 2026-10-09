@@ -26,7 +26,7 @@ canvas pays the full ~144k cost. Two things dirty it:
    elements, rebuilding the canvas ~100x/sec.
 2. **The big screens** — opening/interacting with a screen rebuilds all ~144k.
 
-This plugin reparents **every** top-level screen (and the tooltip) onto its own tiny canvas,
+This plugin reparents **every** top-level screen onto its own tiny canvas,
 so a change only rebuilds that screen's canvas. A tooltip transition then rebuilds ~20
 elements instead of ~144k → the hover stutter is gone. **Tooltips stay fully visible.**
 
@@ -45,20 +45,30 @@ For each top-level child of the shared canvas (in original sibling order):
 
 Screens listed in `ExcludeNames` are left on the shared canvas.
 
+## Runtime canvas watcher
+
+Some mods build overlays at runtime (e.g. `Binder Overhaul`'s filter/sort modal). These new
+canvases land **below** the reparented screens (which sit at `BaseSortingOrder`+), so the mod's
+UI ends up hidden behind a screen. A watcher catches each new top-level canvas created after
+the split and shifts it to `BaseSortingOrder + (top-level child count) + its own sortingOrder`,
+which lands it above all our screens while preserving the relative order among mod-created
+canvases. Toggle with `WatchCanvases`.
+
 ## Config (`BepInEx/config/hecrj.stutter.begone.cfg`)
 
 | Key | Default | Meaning |
 |---|---|---|
-| `Enabled` | `true` | Master switch. False = original (single giant canvas) behavior. |
+| `Enabled` | `true` | Master switch. |
 | `GiantCanvasName` | `Canvas` | The shared canvas to split (falls back to the biggest canvas). |
 | `ExcludeNames` | *(empty)* | Comma-separated screen names to leave on the shared canvas. Empty = reparent everything. Add a name here if a screen breaks. |
 | `ApplyDelayFrames` | `10` | Extra frames to wait after the canvas is found, before the settle wait begins. |
-| `BaseSortingOrder` | `1000` | Base `sortingOrder`; each moved screen gets this + its original sibling index. |
+| `BaseSortingOrder` | `100` | Base `sortingOrder`; each moved screen gets this + its original sibling index. |
 | `ProbeInterval` | `30` | Frames between canvas-size samples while waiting for the UI to finish building. |
 | `SettleFrames` | `240` | How long the element count must be unchanged before splitting. |
 | `MaxWaitFrames` | `900` | Give up the settle wait after this and split anyway (also scales the loading-done hard cap). |
 | `MinTotalCanvasRenderers` | `5000` | The canvas must reach this many CanvasRenderers before it counts as "built". |
 | `UseEplSignal` | `true` | Use EPL's `OnBundleLoadingComplete` event to detect the end of loading. |
+| `WatchCanvases` | `true` | Watch for new runtime canvases (e.g. a mod's overlay/modal) and shift them above the reparented screens so they stay on top. `false` = don't watch. |
 
 > **Timing (two gates).** The loading screen can last well over 15 s; during it the shared
 > canvas only holds the base UI. The plugin waits for (1) EPL's `OnBundleLoadingComplete`

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
@@ -51,6 +52,7 @@ namespace StutterBegone
         private ConfigEntry<int> _maxWaitFrames;
         private ConfigEntry<int> _minTotalCR;
         private ConfigEntry<bool> _useEplSignal;
+        private ConfigEntry<bool> _watchCanvases;
 
         private Canvas _giant;
         // Canvas watcher state: ourMaxSort = first sortingOrder slot above ALL our
@@ -84,7 +86,7 @@ namespace StutterBegone
                 "Frames to wait after the scene is ready before splitting. Lets other mods finish " +
                 "initializing (and cache references) before transforms move.");
 
-            _baseSortOrder = Config.Bind("General", "BaseSortingOrder", 1000,
+            _baseSortOrder = Config.Bind("General", "BaseSortingOrder", 100,
                 "Base sortingOrder for new screen canvases. Each moved screen gets " +
                 "BaseSortingOrder + its original sibling index, which preserves the original " +
                 "layering. Keep it above the shared canvas (0).");
@@ -108,9 +110,14 @@ namespace StutterBegone
                 "Use EPL's OnBundleLoadingComplete event to know when content loading finishes " +
                 "(recommended; handles the long loading screen). False = fall back to canvas-size heuristics.");
 
+            _watchCanvases = Config.Bind("General", "WatchCanvases", true,
+                "Watch for new runtime canvases (e.g. a mod's overlay/modal) and shift them above " +
+                "the reparented screens so they stay on top. False = don't watch (new canvases keep " +
+                "their own sortingOrder).");
+
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[StutterBegone] v1.1.0 loaded (Enabled={_enabled.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
+            Logger.LogInfo($"[StutterBegone] v1.1.0 loaded (Enabled={_enabled.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Watch={_watchCanvases.Value}, Exclude=[{_exclude.Value}])");
         }
 
         private void ParseExcludes()
@@ -374,6 +381,11 @@ namespace StutterBegone
             // Watch for NEW root canvases created at runtime (e.g. a mod's modal) and shift
             // them above all our reparented screens, preserving their relative order:
             //   newSort = BaseSortingOrder + totalTopLevelChildren + canvas.sortingOrder
+            if (!_watchCanvases.Value)
+            {
+                Logger.LogInfo("[StutterBegone] canvas watcher disabled (WatchCanvases=false) - new runtime canvases keep their own sortingOrder.");
+                return;
+            }
             _ourMaxSort = _baseSortOrder.Value + n;
             _knownCanvases = new HashSet<GameObject>();
             foreach (var c in FindObjectsOfType<Canvas>())
@@ -389,10 +401,12 @@ namespace StutterBegone
         private IEnumerator WatchNewCanvases()
         {
             int counter = 0;
+            int checkCount = 0;
             while (true)
             {
                 yield return null;
                 if (++counter % 5 != 0) continue; // check every 5 frames
+                var sw = Stopwatch.StartNew();
                 Canvas[] all = FindObjectsOfType<Canvas>();
                 for (int i = 0; i < all.Length; i++)
                 {
@@ -402,10 +416,14 @@ namespace StutterBegone
                     if (!IsRootCanvas(c)) continue; // nested canvases stay unmarked (re-checked each poll)
                     _knownCanvases.Add(c.gameObject);
                     int old = c.sortingOrder;
-                    int newSort = _ourMaxSort + old;
+                    int newSort = Math.Clamp(_ourMaxSort + old, -32768, 32767);
                     c.sortingOrder = newSort;
                     Logger.LogInfo($"[StutterBegone]   shifted new runtime canvas '{c.gameObject.name}' sort {old} -> {newSort}");
                 }
+                sw.Stop();
+                // Warn if a scan ever exceeds 200us (checked once per ~second window).
+                if (++checkCount % 24 == 0 && sw.Elapsed.TotalMilliseconds > 0.2)
+                    Logger.LogWarning($"[StutterBegone]   watcher scan SLOW: {all.Length} canvases in {sw.Elapsed.TotalMilliseconds:F3} ms (>200us)");
             }
         }
 
@@ -429,7 +447,8 @@ namespace StutterBegone
                 go.layer = screen.gameObject.layer;
                 var c = go.AddComponent<Canvas>();
                 c.renderMode = RenderMode.ScreenSpaceOverlay;
-                c.sortingOrder = sortOrder;
+                // sortingOrder is stored internally as Int16; clamp to [-32768, 32767].
+                c.sortingOrder = Math.Clamp(sortOrder, -32768, 32767);
                 c.overrideSorting = true;
                 c.pixelPerfect = false;
 
