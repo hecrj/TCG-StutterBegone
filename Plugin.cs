@@ -7,7 +7,7 @@ using BepInEx.Configuration;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace CanvasSplitter
+namespace StutterBegone
 {
     /// <summary>
     /// Splits the game's giant shared UI canvas into one small canvas per screen.
@@ -37,7 +37,7 @@ namespace CanvasSplitter
     ///
     /// This plugin makes no Harmony patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "2.0.0")]
+    [BepInPlugin("hover.stutter.begone", "StutterBegone", "2.1.0")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -119,7 +119,7 @@ namespace CanvasSplitter
 
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v2.0.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
+            Logger.LogInfo($"[StutterBegone] v2.0.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
         }
 
         private void ParseExcludes()
@@ -145,7 +145,7 @@ namespace CanvasSplitter
 
                 if (!_enabled.Value || _mode.Value == SplitMode.Off)
                 {
-                    Logger.LogInfo($"[CanvasSplitter] disabled (Enabled={_enabled.Value}, Mode={_mode.Value}) - doing nothing.");
+                    Logger.LogInfo($"[StutterBegone] disabled (Enabled={_enabled.Value}, Mode={_mode.Value}) - doing nothing.");
                     yield break;
                 }
 
@@ -164,13 +164,13 @@ namespace CanvasSplitter
                         if (TrySubscribeBundleComplete())
                         {
                             _eplSubscribed = true;
-                            Logger.LogInfo("[CanvasSplitter] subscribed to EPL OnBundleLoadingComplete (hot/cold).");
+                            Logger.LogInfo("[StutterBegone] subscribed to EPL OnBundleLoadingComplete (hot/cold).");
                         }
                     }
                     if (_bundleComplete)
                     {
                         loadingDone = true;
-                        Logger.LogInfo($"[CanvasSplitter] EPL OnBundleLoadingComplete fired (frame {aFrame}) - content loaded.");
+                        Logger.LogInfo($"[StutterBegone] EPL OnBundleLoadingComplete fired (frame {aFrame}) - content loaded.");
                     }
                     else if (!_useEplSignal.Value && aFrame % 30 == 0)
                     {
@@ -178,12 +178,12 @@ namespace CanvasSplitter
                         if (g != null && CountCR(g) >= _minTotalCR.Value)
                         {
                             loadingDone = true;
-                            Logger.LogInfo("[CanvasSplitter] no EPL signal; canvas reached threshold - assuming content loaded.");
+                            Logger.LogInfo("[StutterBegone] no EPL signal; canvas reached threshold - assuming content loaded.");
                         }
                     }
                 }
                 if (!loadingDone)
-                    Logger.LogWarning($"[CanvasSplitter] loading-done wait hit hard cap ({aHardCap}f); proceeding.");
+                    Logger.LogWarning($"[StutterBegone] loading-done wait hit hard cap ({aHardCap}f); proceeding.");
 
                 // Phase 2b: wait until the REAL canvas is FULLY built. After the event the game
                 // switches to the shop scene (old canvas destroyed, new one created), and the
@@ -201,7 +201,7 @@ namespace CanvasSplitter
                     int cr = (frame % probe == 0) ? CountCR(_giant) : lastCR; // expensive, throttled
                     if (frame % probe == 0 && (cr != lastCR || cc != lastCC))
                     {
-                        Logger.LogInfo($"[CanvasSplitter]   building: children {lastCC}->{cc}, CanvasRenderers {lastCR}->{cr}");
+                        Logger.LogInfo($"[StutterBegone]   building: children {lastCC}->{cc}, CanvasRenderers {lastCR}->{cr}");
                         lastCR = cr; lastCC = cc; lastChangeFrame = frame;
                     }
                     else if (cc != lastCC)
@@ -212,12 +212,12 @@ namespace CanvasSplitter
                         break;
                 }
                 if (frame >= maxWait)
-                    Logger.LogWarning($"[CanvasSplitter] settle wait hit max ({maxWait}f, CR={lastCR}); splitting anyway.");
+                    Logger.LogWarning($"[StutterBegone] settle wait hit max ({maxWait}f, CR={lastCR}); splitting anyway.");
 
                 _giant = FindGiantCanvas();
                 if (_giant == null)
                 {
-                    Logger.LogError("[CanvasSplitter] canvas not found at split time - aborting.");
+                    Logger.LogError("[StutterBegone] canvas not found at split time - aborting.");
                     yield break;
                 }
 
@@ -230,7 +230,7 @@ namespace CanvasSplitter
                 }
                 catch (Exception e)
                 {
-                    Logger.LogError("[CanvasSplitter] split failed: " + e);
+                    Logger.LogError("[StutterBegone] split failed: " + e);
                 }
                 yield break;
         }
@@ -269,7 +269,7 @@ namespace CanvasSplitter
             }
             catch (Exception e)
             {
-                Logger.LogWarning("[CanvasSplitter] EPL OnBundleLoadingComplete subscribe failed: " + e.Message);
+                Logger.LogWarning("[StutterBegone] EPL OnBundleLoadingComplete subscribe failed: " + e.Message);
                 return false;
             }
         }
@@ -303,7 +303,7 @@ namespace CanvasSplitter
             }
             catch (Exception e)
             {
-                Logger.LogWarning("[CanvasSplitter] failed to add raycaster to " + canvasRoot.name + ": " + e.Message);
+                Logger.LogWarning("[StutterBegone] failed to add raycaster to " + canvasRoot.name + ": " + e.Message);
             }
         }
 
@@ -334,7 +334,7 @@ namespace CanvasSplitter
             }
             catch (Exception e)
             {
-                Logger.LogWarning("[CanvasSplitter] could not register raycaster with RaycasterManager: " + e.Message);
+                Logger.LogWarning("[StutterBegone] could not register raycaster with RaycasterManager: " + e.Message);
             }
         }
 
@@ -381,7 +381,7 @@ namespace CanvasSplitter
                 if (t == null) continue;
                 if (_excluded.Contains(t.name))
                 {
-                    Logger.LogInfo($"[CanvasSplitter]   skip (excluded): '{t.name}'");
+                    Logger.LogInfo($"[StutterBegone]   skip (excluded): '{t.name}'");
                     skippedExcl++;
                     continue;
                 }
@@ -389,14 +389,14 @@ namespace CanvasSplitter
                 int sortOrder = baseSort + j;
 
                 if (t.gameObject.activeInHierarchy)
-                    Logger.LogWarning($"[CanvasSplitter]   NOTE: '{t.name}' is ACTIVE while being split (may cause a one-frame visual blip).");
+                    Logger.LogWarning($"[StutterBegone]   NOTE: '{t.name}' is ACTIVE while being split (may cause a one-frame visual blip).");
 
                 if (_mode.Value == SplitMode.Reparent) ReparentScreen(t, cr, sortOrder);
                 else NestScreen(t, cr, sortOrder);
                 moved++;
             }
 
-            Logger.LogInfo($"[CanvasSplitter] done: mode={_mode.Value} moved={moved} skippedExcluded={skippedExcl}");
+            Logger.LogInfo($"[StutterBegone] done: mode={_mode.Value} moved={moved} skippedExcluded={skippedExcl}");
         }
 
         private void ReparentScreen(Transform screen, int cr, int sortOrder)
@@ -404,7 +404,7 @@ namespace CanvasSplitter
             try
             {
                 string oldPath = GetPath(screen);
-                var go = new GameObject("CanvasSplitter_" + screen.name);
+                var go = new GameObject("StutterBegone_" + screen.name);
                 go.layer = screen.gameObject.layer;
                 var c = go.AddComponent<Canvas>();
                 c.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -429,11 +429,11 @@ namespace CanvasSplitter
 
                 screen.SetParent(go.transform, worldPositionStays: false);
                 int after = c.GetComponentsInChildren<CanvasRenderer>(true).Length;
-                Logger.LogInfo($"[CanvasSplitter]   REPARENT '{screen.name}' CR {cr}->{after} sort={sortOrder}  {oldPath} -> {GetPath(screen)}");
+                Logger.LogInfo($"[StutterBegone]   REPARENT '{screen.name}' CR {cr}->{after} sort={sortOrder}  {oldPath} -> {GetPath(screen)}");
             }
             catch (Exception e)
             {
-                Logger.LogError($"[CanvasSplitter] reparent failed for '{screen.name}': {e}");
+                Logger.LogError($"[StutterBegone] reparent failed for '{screen.name}': {e}");
             }
         }
 
@@ -450,11 +450,11 @@ namespace CanvasSplitter
                 // Intentionally NO CanvasScaler here: the nested canvas inherits the parent's
                 // scaling, so the screen should render exactly as before.
                 AddAndRegisterRaycaster(screen.gameObject);
-                Logger.LogInfo($"[CanvasSplitter]   NEST '{screen.name}' CR={cr} sort={sortOrder} (in place, path unchanged: {GetPath(screen)})");
+                Logger.LogInfo($"[StutterBegone]   NEST '{screen.name}' CR={cr} sort={sortOrder} (in place, path unchanged: {GetPath(screen)})");
             }
             catch (Exception e)
             {
-                Logger.LogError($"[CanvasSplitter] nest failed for '{screen.name}': {e}");
+                Logger.LogError($"[StutterBegone] nest failed for '{screen.name}': {e}");
             }
         }
 
@@ -475,13 +475,13 @@ namespace CanvasSplitter
                     rows.Add((all[i].gameObject.name, crs.Length, active));
                 }
                 rows.Sort((a, b) => b.cr - a.cr);
-                Logger.LogInfo($"[CanvasSplitter] CENSUS {phase}: {all.Length} canvases, {total} CanvasRenderers total, {totalActive} active");
+                Logger.LogInfo($"[StutterBegone] CENSUS {phase}: {all.Length} canvases, {total} CanvasRenderers total, {totalActive} active");
                 for (int i = 0; i < rows.Count && i < 12; i++)
-                    Logger.LogInfo($"[CanvasSplitter]   {phase} {rows[i].name}: {rows[i].cr} CR ({rows[i].active} active)");
+                    Logger.LogInfo($"[StutterBegone]   {phase} {rows[i].name}: {rows[i].cr} CR ({rows[i].active} active)");
             }
             catch (Exception e)
             {
-                Logger.LogError($"[CanvasSplitter] census failed ({phase}): {e}");
+                Logger.LogError($"[StutterBegone] census failed ({phase}): {e}");
             }
         }
 

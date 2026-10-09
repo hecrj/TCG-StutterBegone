@@ -3,8 +3,8 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>CanvasSplitter</AssemblyName>
-    <RootNamespace>CanvasSplitter</RootNamespace>
+    <AssemblyName>StutterBegone</AssemblyName>
+    <RootNamespace>StutterBegone</RootNamespace>
     <Nullable>disable</Nullable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>

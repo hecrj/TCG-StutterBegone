@@ -1,7 +1,7 @@
-# Canvas Splitter (TCG Card Shop Simulator)
+# StutterBegone (TCG Card Shop Simulator)
 
 BepInEx 5 plugin. Splits the game's giant shared UI canvas into one small canvas per
-screen, which is the root fix for the hover stutter.
+screen, which is the root fix for the hover stutter. (Formerly "Canvas Splitter".)
 
 ## Why
 
@@ -34,7 +34,7 @@ elements instead of ~144k → the hover stutter is gone. **Tooltips stay fully v
 
 For each top-level child of the shared canvas (in original sibling order):
 
-1. Create a new root `ScreenSpaceOverlay` canvas named `CanvasSplitter_<screen>`.
+1. Create a new root `ScreenSpaceOverlay` canvas named `StutterBegone_<screen>`.
 2. Set `sortingOrder = BaseSortingOrder + (original sibling index)`. This preserves the
    **exact original layering** — an overlay that was in front of a screen (e.g. the shopping
    cart) stays in front of it after both are moved.
@@ -52,7 +52,7 @@ Screens listed in `ExcludeNames` are left on the shared canvas.
   hierarchy/path change, so no `GameObject.Find` can break; verify visuals in-game).
 - **`Off`** — do nothing.
 
-## Config (`BepInEx/config/hover.canvas.splitter.cfg`)
+## Config (`BepInEx/config/hover.stutter.begone.cfg`)
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -93,11 +93,11 @@ log lines) to `ExcludeNames` and restart.
 
 ## Uninstall
 
-Delete `BepInEx/plugins/CanvasSplitter/`. No game or mod files are modified.
+Delete `BepInEx/plugins/StutterBegone/`. No game or mod files are modified.
 
 ## Building
 
 ```
 dotnet build -c Release -p:GameDir="C:/path/to/TCG Card Shop Simulator" -o out
 ```
-Deploy `out/CanvasSplitter.dll` to `BepInEx/plugins/CanvasSplitter/`.
+Deploy `out/StutterBegone.dll` to `BepInEx/plugins/StutterBegone/`.
