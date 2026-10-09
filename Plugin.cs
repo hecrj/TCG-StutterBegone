@@ -33,29 +33,15 @@ namespace StutterBegone
     /// (reparent everything); add a name there if a screen breaks (e.g. one a mod locates by
     /// path or a direct-child Transform.Find that runs at runtime).
     ///
-    /// Modes: Reparent (default) = new root overlay canvas per screen. Nested (experimental)
-    /// = nested overrideSorting canvas in place (no path change). Off = do nothing.
-    ///
     /// This plugin makes no Harmony patches. It runs once per scene load.
     /// </summary>
     // EPL is a soft dependency: if it's installed it loads first (so Epl.IsAvailable is true
     // when we run); if it's missing we still load and fall back to canvas-size heuristics.
     [BepInDependency("EnhancedPrefabLoader", BepInDependency.DependencyFlags.SoftDependency)]
-    [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "1.0.0")]
+    [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "1.1.0")]
     public class Plugin : BaseUnityPlugin
     {
-        public enum SplitMode
-        {
-            /// <summary>No-op (original behavior).</summary>
-            Off,
-            /// <summary>(Default) Give each qualifying screen its own root overlay canvas.</summary>
-            Reparent,
-            /// <summary>Experimental: nested canvas in place, no path change.</summary>
-            Nested
-        }
-
         private ConfigEntry<bool> _enabled;
-        private ConfigEntry<SplitMode> _mode;
         private ConfigEntry<string> _giantName;
         private ConfigEntry<string> _exclude;
         private ConfigEntry<int> _delayFrames;
@@ -80,11 +66,6 @@ namespace StutterBegone
         {
             _enabled = Config.Bind("General", "Enabled", true,
                 "Master switch. False = original (single giant canvas) behavior.");
-
-            _mode = Config.Bind("General", "Mode", SplitMode.Reparent,
-                "Reparent = new root overlay canvas per big screen (proven visuals; default). " +
-                "Nested = nested canvas in place, no path change (experimental, verify visuals). " +
-                "Off = do nothing.");
 
             _giantName = Config.Bind("General", "GiantCanvasName", "Canvas",
                 "Name of the shared UI canvas to split. Falls back to the canvas with the most CanvasRenderers if not found by name.");
@@ -123,7 +104,7 @@ namespace StutterBegone
 
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[StutterBegone] v1.0.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
+            Logger.LogInfo($"[StutterBegone] v1.1.0 loaded (Enabled={_enabled.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
         }
 
         private void ParseExcludes()
@@ -147,9 +128,9 @@ namespace StutterBegone
                 // Phase 1: wait for the game to be up (a canvas exists).
                 while (FindGiantCanvas() == null) yield return null;
 
-                if (!_enabled.Value || _mode.Value == SplitMode.Off)
+                if (!_enabled.Value)
                 {
-                    Logger.LogInfo($"[StutterBegone] disabled (Enabled={_enabled.Value}, Mode={_mode.Value}) - doing nothing.");
+                    Logger.LogInfo($"[StutterBegone] disabled (Enabled={_enabled.Value}) - doing nothing.");
                     yield break;
                 }
 
@@ -378,12 +359,11 @@ namespace StutterBegone
                 if (t.gameObject.activeInHierarchy)
                     Logger.LogWarning($"[StutterBegone]   NOTE: '{t.name}' is ACTIVE while being split (may cause a one-frame visual blip).");
 
-                if (_mode.Value == SplitMode.Reparent) ReparentScreen(t, cr, sortOrder);
-                else NestScreen(t, cr, sortOrder);
+                ReparentScreen(t, cr, sortOrder);
                 moved++;
             }
 
-            Logger.LogInfo($"[StutterBegone] done: mode={_mode.Value} moved={moved} skippedExcluded={skippedExcl}");
+            Logger.LogInfo($"[StutterBegone] done: moved={moved} skippedExcluded={skippedExcl}");
         }
 
         private void ReparentScreen(Transform screen, int cr, int sortOrder)
@@ -421,27 +401,6 @@ namespace StutterBegone
             catch (Exception e)
             {
                 Logger.LogError($"[StutterBegone] reparent failed for '{screen.name}': {e}");
-            }
-        }
-
-        private void NestScreen(Transform screen, int cr, int sortOrder)
-        {
-            try
-            {
-                var c = screen.gameObject.GetComponent<Canvas>();
-                if (c == null) c = screen.gameObject.AddComponent<Canvas>();
-                c.renderMode = RenderMode.ScreenSpaceOverlay;
-                c.overrideSorting = true;
-                c.sortingOrder = sortOrder;
-                c.pixelPerfect = false;
-                // Intentionally NO CanvasScaler here: the nested canvas inherits the parent's
-                // scaling, so the screen should render exactly as before.
-                AddAndRegisterRaycaster(screen.gameObject);
-                Logger.LogInfo($"[StutterBegone]   NEST '{screen.name}' CR={cr} sort={sortOrder} (in place, path unchanged: {GetPath(screen)})");
-            }
-            catch (Exception e)
-            {
-                Logger.LogError($"[StutterBegone] nest failed for '{screen.name}': {e}");
             }
         }
 

@@ -45,19 +45,11 @@ For each top-level child of the shared canvas (in original sibling order):
 
 Screens listed in `ExcludeNames` are left on the shared canvas.
 
-## Modes
-
-- **`Reparent`** (default) — new root `ScreenSpaceOverlay` canvas per screen.
-- **`Nested`** (experimental) — nested `overrideSorting` `Canvas` added in place (no
-  hierarchy/path change, so no `GameObject.Find` can break; verify visuals in-game).
-- **`Off`** — do nothing.
-
 ## Config (`BepInEx/config/hecrj.stutter.begone.cfg`)
 
 | Key | Default | Meaning |
 |---|---|---|
-| `Enabled` | `true` | Master switch. |
-| `Mode` | `Reparent` | `Reparent` / `Nested` / `Off`. |
+| `Enabled` | `true` | Master switch. False = original (single giant canvas) behavior. |
 | `GiantCanvasName` | `Canvas` | The shared canvas to split (falls back to the biggest canvas). |
 | `ExcludeNames` | *(empty)* | Comma-separated screen names to leave on the shared canvas. Empty = reparent everything. Add a name here if a screen breaks. |
 | `ApplyDelayFrames` | `10` | Extra frames to wait after the canvas is found, before the settle wait begins. |
