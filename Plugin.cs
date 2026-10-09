@@ -10,40 +10,34 @@ using UnityEngine.UI;
 namespace CanvasSplitter
 {
     /// <summary>
-    /// Generalizes the TooltipStutterFix "dedicated canvas" idea to the whole UI.
+    /// Splits the game's giant shared UI canvas into one small canvas per screen.
     ///
     /// The game pools EVERY full-screen UI under ONE shared ScreenSpaceOverlay canvas
     /// ('Canvas'). With a full mod set that canvas holds ~144,000-150,000 CanvasRenderers
-    /// (CheckPriceScreen ~47k, RestockItemScreen ~26k, RestockItemBoardGameScreen ~26k,
-    /// PlayCardSetUI ~10k, deck editor, furniture shop, ... plus one panel per card/item in
-    /// every content pack). Only ~50-140 are active at a time, but Unity invalidates and
-    /// rebuilds at the CANVAS granularity, so anything that dirties that canvas pays the full
-    /// ~144k cost. The tooltip was the per-frame churn source (fixed by TooltipStutterFix);
-    /// this plugin additionally isolates each big screen onto its own canvas so that
-    /// opening / interacting with a screen only rebuilds that screen's canvas, not all 144k.
+    /// (only ~50-140 active at a time). Unity invalidates and rebuilds at the CANVAS
+    /// granularity, so anything that dirties that canvas (a tooltip transition, opening a
+    /// screen) pays the full ~144k cost. This plugin reparents every top-level screen onto
+    /// its own tiny overlay canvas, so a change only rebuilds that screen's canvas.
     ///
-    /// Two modes:
-    ///   Reparent (default) - create a new root ScreenSpaceOverlay canvas per screen and move
-    ///     the screen group onto it (scaler copied, so it renders identically). This is the
-    ///     same proven technique as the tooltip fix. By default it EXCLUDES the screens that
-    ///     other mods locate by path (RestockItemScreen_Grp, referenced by EPL/ShopOS via
-    ///     GameObject.Find("Canvas/RestockItemScreen_Grp")) and the mod-created
-    ///     CustomShop_SharedScreen_Grp, so nothing breaks.
-    ///   Nested (experimental) - add a nested overrideSorting Canvas to each screen IN PLACE.
-    ///     No hierarchy/path change, so it can move EVERY screen (including RestockItemScreen_Grp)
-    ///     without breaking any GameObject.Find. Needs in-game visual verification.
+    /// Every top-level child is moved to a new root ScreenSpaceOverlay canvas with
+    /// sortingOrder = BaseSortingOrder + its original sibling index, which preserves the
+    /// exact original layering (z-order). A GraphicRaycaster is added to each new canvas
+    /// (and registered with the game's RaycasterManager) so the UI stays clickable.
     ///
-    /// Tooltip fix (built in, ported from TooltipStutterFix): the tooltip UI
-    /// (InputTooltipListDisplay) is the per-frame churn source - every hover add/remove
-    /// dirties the shared canvas. This plugin moves it onto its own tiny dedicated overlay
-    /// canvas so a tooltip transition rebuilds ~20 elements instead of ~144k. Tooltips stay
-    /// fully visible. If TooltipStutterFix is also enabled it will have already moved the
-    /// tooltip, so this step detects that and skips (no double move).
+    /// The tooltip (InputTooltipListDisplay) is moved too - it is the per-frame churn
+    /// source, and on its own canvas a tooltip transition rebuilds ~20 elements instead of
+    /// ~144k, which is the root fix for the hover stutter. No separate tooltip handling.
     ///
-    /// This plugin makes no Harmony patches. It runs once per scene load. It references the
-    /// game assembly only for the tooltip fix (InputTooltipListDisplay).
+    /// Screens listed in ExcludeNames are left on the shared canvas. The default is empty
+    /// (reparent everything); add a name there if a screen breaks (e.g. one a mod locates by
+    /// path or a direct-child Transform.Find that runs at runtime).
+    ///
+    /// Modes: Reparent (default) = new root overlay canvas per screen. Nested (experimental)
+    /// = nested overrideSorting canvas in place (no path change). Off = do nothing.
+    ///
+    /// This plugin makes no Harmony patches. It runs once per scene load.
     /// </summary>
-    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "1.5.0")]
+    [BepInPlugin("hover.canvas.splitter", "Canvas Splitter", "2.0.0")]
     public class Plugin : BaseUnityPlugin
     {
         public enum SplitMode
@@ -59,7 +53,6 @@ namespace CanvasSplitter
         private ConfigEntry<bool> _enabled;
         private ConfigEntry<SplitMode> _mode;
         private ConfigEntry<string> _giantName;
-        private ConfigEntry<int> _minCR;
         private ConfigEntry<string> _exclude;
         private ConfigEntry<int> _delayFrames;
         private ConfigEntry<int> _baseSortOrder;
@@ -68,30 +61,16 @@ namespace CanvasSplitter
         private ConfigEntry<int> _maxWaitFrames;
         private ConfigEntry<int> _minTotalCR;
         private ConfigEntry<bool> _useEplSignal;
-        private ConfigEntry<bool> _tooltipFix;
-        private ConfigEntry<bool> _preserveZOrder;
 
         private Canvas _giant;
         private bool _bundleComplete;
         private bool _eplSubscribed;
         private HashSet<string> _excluded = new HashSet<string>(StringComparer.Ordinal);
 
-        // Tooltip-dedicated-canvas fix state (ported from TooltipStutterFix).
-        private InputTooltipListDisplay _tipDisplay;
-        private Canvas _tipCanvas;
-        private Canvas _dediCanvas;
-        private Transform _tipOrigParent;
-
-        // Default excludes protect screens that other code locates by path or that are
-        // created by mods (timing-dependent). Reparent mode is safe with these excluded.
-        private static readonly string DefaultExcludes = string.Join(",", new[]
-        {
-            "RestockItemScreen_Grp",          // EPL + ShopOS: GameObject.Find("Canvas/RestockItemScreen_Grp")
-            "CustomShop_SharedScreen_Grp",    // created by EPL at runtime
-            "InputTooltipListDisplay",        // moved off by the built-in tooltip fix (or TooltipStutterFix)
-            "TooltipStutterFix_DedicatedCanvas",
-            "CanvasSplitter_TooltipCanvas"    // this plugin's tooltip canvas (root object, not under the shared canvas)
-        });
+        // Default: reparent EVERYTHING (empty exclude list). If a screen breaks (a mod
+        // locates it by path, or a direct-child Transform.Find that runs at runtime), add
+        // its name to ExcludeNames.
+        private static readonly string DefaultExcludes = string.Empty;
 
         private void Awake()
         {
@@ -106,21 +85,18 @@ namespace CanvasSplitter
             _giantName = Config.Bind("General", "GiantCanvasName", "Canvas",
                 "Name of the shared UI canvas to split. Falls back to the canvas with the most CanvasRenderers if not found by name.");
 
-            _minCR = Config.Bind("General", "MinCanvasRenderers", 2000,
-                "Only split top-level screens with at least this many CanvasRenderers. " +
-                "Lower = more screens moved (smaller shared canvas) but more changes; higher = less risk.");
-
             _exclude = Config.Bind("General", "ExcludeNames", DefaultExcludes,
-                "Comma-separated screen names to NOT split. Defaults protect path-referenced " +
-                "(RestockItemScreen_Grp) and mod-created (CustomShop_SharedScreen_Grp) screens.");
+                "Comma-separated screen names to leave on the shared canvas (NOT reparented). " +
+                "Default is empty (reparent everything). Add a name here if that screen breaks.");
 
             _delayFrames = Config.Bind("General", "ApplyDelayFrames", 10,
                 "Frames to wait after the scene is ready before splitting. Lets other mods finish " +
                 "initializing (and cache references) before transforms move.");
 
             _baseSortOrder = Config.Bind("General", "BaseSortingOrder", 1000,
-                "Base sortingOrder for new screen canvases. Original sibling order is added to it to " +
-                "preserve layering. Keep it above the shared canvas (0) and below the tooltip canvas (2000).");
+                "Base sortingOrder for new screen canvases. Each moved screen gets " +
+                "BaseSortingOrder + its original sibling index, which preserves the original " +
+                "layering. Keep it above the shared canvas (0).");
 
             _probeInterval = Config.Bind("General", "ProbeInterval", 30,
                 "Frames between canvas-size samples while waiting for the UI to finish building. " +
@@ -141,21 +117,9 @@ namespace CanvasSplitter
                 "Use EPL's OnBundleLoadingComplete event to know when content loading finishes " +
                 "(recommended; handles the long loading screen). False = fall back to canvas-size heuristics.");
 
-            _tooltipFix = Config.Bind("General", "TooltipDedicatedCanvas", true,
-                "Move the tooltip UI (InputTooltipListDisplay) onto its own tiny dedicated canvas " +
-                "(the root fix for hover stutter, ported from TooltipStutterFix). Tooltips stay visible. " +
-                "Keep TooltipStutterFix disabled when this is on (this step detects and skips it if both run).");
-
-            _preserveZOrder = Config.Bind("General", "PreserveZOrder", true,
-                "Reparent mode only: also move small elements that render IN FRONT of a split screen " +
-                "(e.g. the board-game shop's shopping cart) onto their own canvas with a higher sort order, " +
-                "so the split screen doesn't cover them. Sort order = BaseSortingOrder + original sibling " +
-                "index, which preserves the exact original layering. False = move only big screens (an " +
-                "overlay in front of a screen can end up behind it).");
-
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[CanvasSplitter] v1.5.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', MinCR={_minCR.Value}, EplSignal={_useEplSignal.Value}, Tooltip={_tooltipFix.Value}, PreserveZ={_preserveZOrder.Value})");
+            Logger.LogInfo($"[CanvasSplitter] v2.0.0 loaded (Enabled={_enabled.Value}, Mode={_mode.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, Exclude=[{_exclude.Value}])");
         }
 
         private void ParseExcludes()
@@ -261,8 +225,7 @@ namespace CanvasSplitter
                 {
                     ParseExcludes();
                     LogCensus("BEFORE");
-                    if (_enabled.Value && _mode.Value != SplitMode.Off) ApplySplit();
-                    if (_enabled.Value && _tooltipFix.Value) ApplyTooltipFix();
+                    ApplySplit();
                     LogCensus("AFTER");
                 }
                 catch (Exception e)
@@ -270,74 +233,6 @@ namespace CanvasSplitter
                     Logger.LogError("[CanvasSplitter] split failed: " + e);
                 }
                 yield break;
-        }
-
-        /// <summary>
-        /// Ported from TooltipStutterFix (DedicatedCanvas mode): move the tooltip UI subtree
-        /// (InputTooltipListDisplay) off the giant shared canvas onto its own tiny dedicated
-        /// overlay canvas. A tooltip transition then dirties ~20 elements instead of ~144k.
-        /// Skips if the tooltip is already off the shared canvas (e.g. TooltipStutterFix moved it).
-        /// </summary>
-        private void ApplyTooltipFix()
-        {
-            try
-            {
-                if (_tipDisplay == null) _tipDisplay = FindObjectOfType<InputTooltipListDisplay>();
-                if (_tipDisplay == null || _tipDisplay.transform == null)
-                {
-                    Logger.LogWarning("[CanvasSplitter] tooltip fix: InputTooltipListDisplay not found - skipped.");
-                    return;
-                }
-
-                // Nearest canvas the tooltip currently lives on.
-                Transform walk = _tipDisplay.transform;
-                Canvas nearest = null;
-                while (walk != null)
-                {
-                    Canvas c = walk.GetComponent<Canvas>();
-                    if (c != null) { nearest = c; break; }
-                    walk = walk.parent;
-                }
-
-                // If it's already off the shared canvas (e.g. TooltipStutterFix moved it), don't double-move.
-                if (nearest != null && !ReferenceEquals(nearest, _giant))
-                {
-                    Logger.LogInfo($"[CanvasSplitter] tooltip fix: tooltip already off shared canvas (on '{nearest.gameObject.name}') - skipped.");
-                    return;
-                }
-
-                _tipCanvas = nearest; // may be null if not under any canvas; scaler copy will be skipped
-                int before = _tipCanvas != null ? _tipCanvas.GetComponentsInChildren<CanvasRenderer>(true).Length : -1;
-
-                GameObject go = new GameObject("CanvasSplitter_TooltipCanvas");
-                go.layer = _tipDisplay.gameObject.layer;
-                _dediCanvas = go.AddComponent<Canvas>();
-                _dediCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                _dediCanvas.sortingOrder = 2000; // above the shared canvas (0) and all screen canvases (1000+)
-                _dediCanvas.pixelPerfect = false;
-
-                // Copy the shared canvas's scaler so tooltips render at the same size/position.
-                CanvasScaler src = _tipCanvas != null ? _tipCanvas.GetComponent<CanvasScaler>() : null;
-                if (src != null)
-                {
-                    CanvasScaler s = go.AddComponent<CanvasScaler>();
-                    s.uiScaleMode = src.uiScaleMode;
-                    s.referenceResolution = src.referenceResolution;
-                    s.matchWidthOrHeight = src.matchWidthOrHeight;
-                    s.dynamicPixelsPerUnit = src.dynamicPixelsPerUnit;
-                }
-
-                _tipOrigParent = _tipDisplay.transform.parent;
-                _tipDisplay.transform.SetParent(_dediCanvas.transform, worldPositionStays: false);
-                int after = _dediCanvas.GetComponentsInChildren<CanvasRenderer>(true).Length;
-
-                Logger.LogInfo($"[CanvasSplitter] tooltip fix: tooltip UI moved off shared '{(_tipCanvas != null ? _tipCanvas.gameObject.name : "?")}' " +
-                               $"(shared CanvasRenderers={before}, dedicated CanvasRenderers={after}) - hover stutter fix active, tooltips stay visible.");
-            }
-            catch (Exception e)
-            {
-                Logger.LogError("[CanvasSplitter] tooltip fix failed: " + e);
-            }
         }
 
         /// <summary>
@@ -467,31 +362,19 @@ namespace CanvasSplitter
         {
             if (_giant == null) return;
             int n = _giant.transform.childCount;
+            // Snapshot the children BEFORE reparenting: moving a child out of the shared canvas
+            // changes childCount/GetChild, so we iterate a fixed copy.
             var children = new Transform[n];
             for (int i = 0; i < n; i++)
                 children[i] = _giant.transform.GetChild(i);
-
             int baseSort = _baseSortOrder.Value;
-            bool preserveZ = _mode.Value == SplitMode.Reparent && _preserveZOrder.Value;
 
-            // Z-order (Reparent + PreserveZOrder): within the shared canvas, a higher sibling index
-            // renders in FRONT. When a big screen moves to its own canvas it gets a high sort order,
-            // so ANY element that was in front of it (higher sibling index) would now be COVERED by
-            // it - e.g. the board-game shop's shopping cart. To keep the original layering, every
-            // element after the earliest split screen is moved too, with sort = base + sibling index
-            // (which preserves the exact relative order of all moved elements).
-            int minBigIndex = -1;
-            if (preserveZ)
-            {
-                for (int j = 0; j < n; j++)
-                {
-                    if (children[j] == null || _excluded.Contains(children[j].name)) continue;
-                    if (children[j].GetComponentsInChildren<CanvasRenderer>(true).Length >= _minCR.Value) { minBigIndex = j; break; }
-                }
-            }
+            int moved = 0, skippedExcl = 0;
 
-            int moved = 0, movedOverlay = 0, skippedSmall = 0, skippedExcl = 0;
-
+            // Reparent EVERY top-level child (except ExcludeNames) onto its own canvas.
+            // sortingOrder = base + original sibling index preserves the exact original
+            // layering (z-order): an overlay in front of a screen (higher sibling index) stays
+            // in front of it after both are moved.
             for (int j = 0; j < n; j++)
             {
                 var t = children[j];
@@ -503,21 +386,17 @@ namespace CanvasSplitter
                     continue;
                 }
                 int cr = t.GetComponentsInChildren<CanvasRenderer>(true).Length;
-                bool isBig = cr >= _minCR.Value;
-                bool inFrontOfBig = (minBigIndex >= 0 && j > minBigIndex);
-                if (!isBig && !(preserveZ && inFrontOfBig)) { skippedSmall++; continue; }
+                int sortOrder = baseSort + j;
 
-                int sortOrder = baseSort + j; // sort = base + original sibling index preserves z-order
                 if (t.gameObject.activeInHierarchy)
                     Logger.LogWarning($"[CanvasSplitter]   NOTE: '{t.name}' is ACTIVE while being split (may cause a one-frame visual blip).");
 
                 if (_mode.Value == SplitMode.Reparent) ReparentScreen(t, cr, sortOrder);
                 else NestScreen(t, cr, sortOrder);
-                if (!isBig && inFrontOfBig) movedOverlay++;
                 moved++;
             }
 
-            Logger.LogInfo($"[CanvasSplitter] done: mode={_mode.Value} moved={moved} overlays={movedOverlay} skippedSmall={skippedSmall} skippedExcluded={skippedExcl} minBigIndex={minBigIndex}");
+            Logger.LogInfo($"[CanvasSplitter] done: mode={_mode.Value} moved={moved} skippedExcluded={skippedExcl}");
         }
 
         private void ReparentScreen(Transform screen, int cr, int sortOrder)
