@@ -39,7 +39,7 @@ namespace StutterBegone
     // EPL is a soft dependency: if it's installed it loads first (so Epl.IsAvailable is true
     // when we run); if it's missing we still load and fall back to canvas-size heuristics.
     [BepInDependency("EnhancedPrefabLoader", BepInDependency.DependencyFlags.SoftDependency)]
-    [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "1.1.0")]
+    [BepInPlugin("hecrj.stutter.begone", "StutterBegone", "1.2.0")]
     public class Plugin : BaseUnityPlugin
     {
         private ConfigEntry<bool> _enabled;
@@ -116,7 +116,7 @@ namespace StutterBegone
 
             ParseExcludes();
             StartCoroutine(WaitForScene());
-            Logger.LogInfo($"[StutterBegone] v1.1.0 loaded (Enabled={_enabled.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, RescanKey={_rescanKey.Value}, Exclude=[{_exclude.Value}])");
+            Logger.LogInfo($"[StutterBegone] v1.2.0 loaded (Enabled={_enabled.Value}, Giant='{_giantName.Value}', EplSignal={_useEplSignal.Value}, RescanKey={_rescanKey.Value}, Exclude=[{_exclude.Value}])");
         }
 
         private void ParseExcludes()
@@ -152,7 +152,7 @@ namespace StutterBegone
                 // EPL fires OnBundleLoadingComplete (hot/cold) when the bundles finish loading.
                 bool loadingDone = false;
                 int aFrame = 0, aHardCap = Mathf.Max(60, _maxWaitFrames.Value * 6);
-                while (!loadingDone && aFrame < aHardCap)
+                while (!loadingDone)
                 {
                     yield return null;
                     aFrame++;
@@ -179,8 +179,6 @@ namespace StutterBegone
                         }
                     }
                 }
-                if (!loadingDone)
-                    Logger.LogWarning($"[StutterBegone] loading-done wait hit hard cap ({aHardCap}f); proceeding.");
 
                 // Phase 2b: wait until the REAL canvas is FULLY built. After the event the game
                 // switches to the shop scene (old canvas destroyed, new one created), and the
