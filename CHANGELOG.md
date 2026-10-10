@@ -2,6 +2,12 @@
 
 User-facing changes only. For the full config reference, see [README](README.md).
 
+## v1.2.0
+
+- **Fixed:** The plugin no longer gives up waiting for content loading after a fixed time.
+  It now waits as long as needed, so it won't split the canvas before it's fully built
+  (relevant on very long loading screens with a large mod set).
+
 ## v1.1.0
 
 - **Added** `RescanCanvasesKey` (no default). Set a key and press it to shift new runtime
